@@ -51,6 +51,8 @@ const DEFAULT_SSE_HEARTBEAT_MS = 15_000;
 const SERVER_CLOSE_DRAIN_MS = 500;
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_000;
 const MAX_PROMPT_ADMISSIONS = 128;
+const MAX_LOGIN_OWNERS = 32;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const THINKING_LEVELS = new Set([
   "off",
   "minimal",
@@ -141,6 +143,7 @@ export class WebHost {
     string,
     PromptAdmission
   >();
+  private readonly loginOwners = new Map<string, string>();
   private stopping = false;
   private stopPromise?: Promise<void>;
 
@@ -239,6 +242,7 @@ export class WebHost {
   }
 
   publish(type: string, detail?: Record<string, unknown>) {
+    if (type === "provider_login_changed") detail = undefined;
     if (["session_start", "session_switched", "session_created", "session_archived", "workspace_removed"].includes(type)) this.artifacts.revoke();
     this.liveTools = reduceLiveTools(this.liveTools, type, detail ?? {});
     let event: WebEvent = {
@@ -371,6 +375,7 @@ export class WebHost {
     if (pathname === "/api/prompt") return false;
     if (pathname === "/api/turns/cancel") return true;
     if (pathname === "/api/confirmations/answer") return true;
+    if (pathname.startsWith("/api/providers/login/")) return true;
     return pathname.startsWith("/api/workspaces") ||
       pathname.startsWith("/api/sessions") ||
       pathname === "/api/model" ||
@@ -772,6 +777,58 @@ export class WebHost {
         requestId: body.requestId,
       }, body.approved);
       return this.json(response, state === "approved" || state === "denied" ? 200 : 409, { state });
+    }
+    if (url.pathname === "/api/providers/login" && request.method === "GET") {
+      const controller = this.loginController(request);
+      if (!controller) return this.json(response, 403, { code: "NOT_CONTROLLER", error: "a browser controller is required" });
+      const sessionId = url.searchParams.get("sessionId");
+      const current = this.runtime.sessionManager.getSessionId();
+      const logins = sessionId === current && this.runtime.workspaceSelected
+        ? this.runtime.listProviderLogins?.().filter((view) =>
+            this.loginOwners.get(view.id) === controller &&
+            view.sessionId === current && view.workspace === this.runtime.cwd) ?? []
+        : [];
+      return this.json(response, 200, { logins });
+    }
+    if (url.pathname.startsWith("/api/providers/login/") && request.method === "POST") {
+      const controller = this.loginController(request);
+      if (!controller) return this.json(response, 403, { code: "NOT_CONTROLLER", error: "a browser controller is required" });
+      const body = await this.readJson(request);
+      if (typeof body.id !== "string" || !UUID.test(body.id))
+        return this.json(response, 400, { code: "INVALID_LOGIN", error: "a login ID is required" });
+      if (url.pathname === "/api/providers/login/start") {
+        if (typeof body.sessionId !== "string" || body.sessionId.length > 128 ||
+            typeof body.providerId !== "string" || body.providerId.length > 128 ||
+            (body.method !== "api_key" && body.method !== "oauth"))
+          return this.json(response, 400, { code: "INVALID_LOGIN", error: "a provider, method and Session are required" });
+        const owner = this.loginOwners.get(body.id);
+        if (owner && owner !== controller)
+          return this.json(response, 403, { code: "NOT_CONTROLLER", error: "this login belongs to another browser" });
+        if (!this.runtime.startProviderLogin)
+          return this.json(response, 501, { code: "LOGIN_UNAVAILABLE", error: "provider login is unavailable" });
+        const result = this.runtime.startProviderLogin({
+          id: body.id, sessionId: body.sessionId, providerId: body.providerId, method: body.method,
+        });
+        if (result.state === "accepted" || result.state === "replayed") {
+          this.loginOwners.set(body.id, controller);
+          while (this.loginOwners.size > MAX_LOGIN_OWNERS) this.loginOwners.delete(this.loginOwners.keys().next().value!);
+        }
+        return this.json(response, result.state === "accepted" ? 202 : result.state === "replayed" ? 200 : 409, result);
+      }
+      if (this.loginOwners.get(body.id) !== controller)
+        return this.json(response, 403, { code: "NOT_CONTROLLER", error: "this login belongs to another browser" });
+      if (url.pathname === "/api/providers/login/answer") {
+        if (typeof body.promptId !== "string" || !UUID.test(body.promptId) ||
+            typeof body.value !== "string" || body.value.length > 4_096)
+          return this.json(response, 400, { code: "INVALID_LOGIN_ANSWER", error: "a prompt and value are required" });
+        const state = this.runtime.answerProviderLogin?.(body.id, body.promptId, body.value) ?? "stale";
+        return this.json(response, state === "accepted" ? 200 : 409, { state });
+      }
+      if (url.pathname === "/api/providers/login/cancel") {
+        const state = this.runtime.cancelProviderLogin?.(body.id) ?? "stale";
+        return this.json(response, state === "accepted" ? 200 : 409, { state });
+      }
+      return this.json(response, 404, { error: "unknown login action" });
     }
     if (url.pathname === "/api/turns/cancel" && request.method === "POST") {
       const body = await this.readJson(request);
@@ -1382,6 +1439,11 @@ export class WebHost {
       candidate.length === this.token.length &&
       timingSafeEqual(candidate, this.token)
     );
+  }
+
+  private loginController(request: IncomingMessage) {
+    const value = request.headers["x-openpi-web-controller"];
+    return typeof value === "string" && UUID.test(value) ? value : undefined;
   }
 
   private eventsStream(request: IncomingMessage, response: ServerResponse) {

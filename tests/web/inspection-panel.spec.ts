@@ -61,6 +61,7 @@ afterEach(() => {
 it("shows independent status failures without claiming that configured credentials were tested", async () => {
   const fetcher = vi.fn(async (url: string) => {
     expect(url).toContain("sessionId=session-a");
+    if (url.startsWith("/api/providers/login?")) return reply({ logins: [] });
     if (url.startsWith("/api/thinking"))
       return reply({ error: "unavailable" }, 501);
     if (url.startsWith("/api/trust"))
@@ -92,9 +93,9 @@ it("shows independent status failures without claiming that configured credentia
       "Configured credentials do not guarantee a successful model request.",
     ),
   ).toBeTruthy();
-  expect(fetcher).toHaveBeenCalledTimes(3);
+  expect(fetcher).toHaveBeenCalledTimes(4);
   fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
-  await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(6));
+  await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(7));
 });
 
 it("aborts closed-panel reads and ignores late old-session results on reopening", async () => {
@@ -183,6 +184,7 @@ it("rejects another Session's same-id terminal and renders output as plain text"
 
 function thinkingFetcher(thinking: unknown) {
   return vi.fn(async (url: string) => {
+    if (url.startsWith("/api/providers/login?")) return reply({ logins: [] });
     if (url.startsWith("/api/thinking")) return reply(thinking);
     if (url.startsWith("/api/trust"))
       return reply({

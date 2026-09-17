@@ -56,6 +56,8 @@ import {
 import { projectWebModelSearch } from "./model-discovery.ts";
 import { registerWebCleanupConfirmation } from "../../extensions/shared/web-cleanup-confirmation.ts";
 import { WebCleanupConfirmations } from "./confirmation.ts";
+import type { AuthType } from "@earendil-works/pi-ai";
+import { ProviderLogins } from "./provider-login.ts";
 
 const STARTUP_TIMEOUT_MS = 15_000;
 const TURN_CANCELLATION_SETTLEMENT_TIMEOUT_MS = 10_000;
@@ -127,6 +129,8 @@ export class PiWebRuntime implements WebRuntimeController {
     this.emit("confirmation_changed"),
   );
   private readonly cleanupConfirmationRegistrations = new Map<AgentSessionRuntime, () => void>();
+  private readonly providerLogins = new ProviderLogins(() => this.emit("provider_login_changed"));
+  private loginEpoch = 0;
   private readonly retainedRuntimes = new Set<AgentSessionRuntime>();
   private readonly retainedSubscriptions = new Map<AgentSessionRuntime, () => void>();
   private readonly inFlightRuntimes = new Map<AgentSessionRuntime, number>();
@@ -281,6 +285,65 @@ export class PiWebRuntime implements WebRuntimeController {
 
   getPendingConfirmations() {
     return this.cleanupConfirmations.list();
+  }
+
+  listProviderLogins() {
+    return this.providerLogins.list();
+  }
+
+  startProviderLogin(options: {
+    id: string;
+    sessionId: string;
+    providerId: string;
+    method: AuthType;
+  }) {
+    if (
+      this.disposed || !this.hasSelectedWorkspace ||
+      options.sessionId !== this.sessionManager.getSessionId()
+    ) return { state: "stale" as const };
+    const agentRuntime = this.runtime;
+    const modelRuntime = agentRuntime.services.modelRuntime;
+    const provider = modelRuntime.getProviders().find((item) => item.id === options.providerId);
+    if (!provider || !(options.method === "oauth"
+      ? provider.auth.oauth?.login
+      : provider.auth.apiKey?.login)) return { state: "unsupported" as const };
+    if (!this.isIdle()) return { state: "busy" as const };
+    const result = this.providerLogins.start({
+      id: options.id,
+      sessionId: options.sessionId,
+      workspace: agentRuntime.cwd,
+      epoch: this.loginEpoch,
+      providerId: options.providerId,
+      method: options.method,
+    }, async (interaction) => {
+      this.retainRuntimeReference(agentRuntime);
+      try {
+        await modelRuntime.login(options.providerId, options.method, interaction);
+      } finally {
+        this.releaseRuntimeReference(agentRuntime);
+      }
+    });
+    return result;
+  }
+
+  answerProviderLogin(id: string, promptId: string, value: string) {
+    const view = this.providerLogins.get(id);
+    if (
+      !view || this.disposed || !this.hasSelectedWorkspace ||
+      view.sessionId !== this.sessionManager.getSessionId() ||
+      view.workspace !== this.cwd || view.epoch !== this.loginEpoch
+    ) return "stale" as const;
+    return this.providerLogins.answer(id, promptId, value);
+  }
+
+  cancelProviderLogin(id: string) {
+    const view = this.providerLogins.get(id);
+    if (
+      !view || this.disposed || !this.hasSelectedWorkspace ||
+      view.sessionId !== this.sessionManager.getSessionId() ||
+      view.workspace !== this.cwd || view.epoch !== this.loginEpoch
+    ) return "stale" as const;
+    return this.providerLogins.cancel(id);
   }
 
   answerConfirmation(
@@ -461,6 +524,10 @@ export class PiWebRuntime implements WebRuntimeController {
           authMethods: [
             ...(provider.auth.apiKey ? (["api_key"] as const) : []),
             ...(provider.auth.oauth ? (["oauth"] as const) : []),
+          ],
+          loginMethods: [
+            ...(provider.auth.apiKey?.login ? (["api_key"] as const) : []),
+            ...(provider.auth.oauth?.login ? (["oauth"] as const) : []),
           ],
           configured: status.configured,
           ...(source ? { source } : {}),
@@ -956,6 +1023,7 @@ export class PiWebRuntime implements WebRuntimeController {
 
   private async disposeInternal() {
     this.disposed = true;
+    await this.providerLogins.close();
     this.cleanupConfirmations.invalidate();
     for (const unregister of this.cleanupConfirmationRegistrations.values()) unregister();
     this.cleanupConfirmationRegistrations.clear();
@@ -1167,6 +1235,8 @@ export class PiWebRuntime implements WebRuntimeController {
     session: AgentSession,
   ) {
     this.assertActiveRuntime(runtime);
+    this.providerLogins.invalidate();
+    this.loginEpoch++;
     this.cleanupConfirmations.invalidate();
     const unsubscribe = session.subscribe((event) =>
       this.projectEvent(session, event),

@@ -1,6 +1,7 @@
 import type { WebBackgroundTerminalDetail } from "../../../../extensions/shared/web-observer-registry.ts";
 import type { WebProjectTrustStatus } from "../../../runtime/trust-status.ts";
 import type { WebProviderAuthProjection } from "../../../runtime/types.ts";
+import type { ProviderLoginView } from "../../../runtime/provider-login.ts";
 import type {
   WebCleanupConfirmationRequest,
   WebConfirmationReceipt,
@@ -325,6 +326,42 @@ export class WebClient {
       `/api/providers/auth-status?sessionId=${encodeURIComponent(sessionId)}`,
       { signal },
     );
+  }
+
+  providerLogins(sessionId: string, signal?: AbortSignal) {
+    return this.request<{ logins: ProviderLoginView[] }>(
+      `/api/providers/login?sessionId=${encodeURIComponent(sessionId)}`,
+      { signal },
+    );
+  }
+
+  startProviderLogin(
+    sessionId: string,
+    providerId: string,
+    method: "oauth" | "api_key",
+    id: string,
+  ) {
+    return this.request<{ state: string; view: ProviderLoginView }>(
+      "/api/providers/login/start",
+      {
+        method: "POST",
+        body: JSON.stringify({ sessionId, providerId, method, id }),
+      },
+    );
+  }
+
+  answerProviderLogin(id: string, promptId: string, value: string) {
+    return this.request<{ state: string }>("/api/providers/login/answer", {
+      method: "POST",
+      body: JSON.stringify({ id, promptId, value }),
+    });
+  }
+
+  cancelProviderLogin(id: string) {
+    return this.request<{ state: string }>("/api/providers/login/cancel", {
+      method: "POST",
+      body: JSON.stringify({ id }),
+    });
   }
 
   commands(sessionId: string, signal?: AbortSignal) {
