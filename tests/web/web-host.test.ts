@@ -12,6 +12,7 @@ import { registerWebCapability } from "../../extensions/shared/web-observer-regi
 import { WebHost } from "../../web/host/web-host.ts";
 import { projectWebModelSearch } from "../../web/runtime/model-discovery.ts";
 import { WebCleanupConfirmations } from "../../web/runtime/confirmation.ts";
+import { ProviderLogins } from "../../web/runtime/provider-login.ts";
 import {
   type WebRuntimeController,
   type WebRuntimeEvent,
@@ -105,6 +106,15 @@ test("serves workspaces through a runtime isolated from terminal sessions", asyn
   let newSessions = 0;
   let disposed = false;
   const listeners = new Set<(event: WebRuntimeEvent) => void>();
+  const loginEvents: Array<{ type: string; detail?: Record<string, unknown> }> =
+    [];
+  const loginSecret = "sk-private-fixture-value";
+  let loginCalls = 0;
+  let receivedSecret = "";
+  const logins = new ProviderLogins(() => {
+    for (const listener of listeners)
+      listener({ type: "provider_login_changed" });
+  });
   const runtime: WebRuntimeController = {
     workspaceSelected: true,
     sessionDirectory: cwd,
@@ -167,6 +177,7 @@ test("serves workspaces through a runtime isolated from terminal sessions", asyn
           id: "fixture",
           name: "Fixture",
           authMethods: ["api_key"],
+          loginMethods: ["api_key"],
           configured: true,
           source: "environment",
           subscription: false,
@@ -180,6 +191,30 @@ test("serves workspaces through a runtime isolated from terminal sessions", asyn
         maxProviders: 250,
       },
     }),
+    listProviderLogins: () => logins.list(),
+    startProviderLogin: (options) => {
+      if (options.sessionId !== sessionManager.getSessionId())
+        return { state: "stale" };
+      if (options.providerId !== "fixture" || options.method !== "api_key")
+        return { state: "unsupported" };
+      return logins.start(
+        { ...options, workspace: runtimeCwd, epoch: 1 },
+        async (interaction) => {
+          loginCalls++;
+          interaction.notify({
+            type: "auth_url",
+            url: "https://provider.example/auth?state=private-url",
+          });
+          receivedSecret = await interaction.prompt({
+            type: "secret",
+            message: "API key",
+          });
+        },
+      );
+    },
+    answerProviderLogin: (id, promptId, value) =>
+      logins.answer(id, promptId, value),
+    cancelProviderLogin: (id) => logins.cancel(id),
     setModel: async () => {
       throw new WebRuntimeRequestError(
         "Model is not available",
@@ -192,12 +227,14 @@ test("serves workspaces through a runtime isolated from terminal sessions", asyn
       return () => listeners.delete(listener);
     },
     async dispose() {
+      await logins.close();
       disposed = true;
     },
   };
   const host = new WebHost({
     runtime,
     allowedOrigins: ["http://127.0.0.1:59999"],
+    onEvent: (type, detail) => loginEvents.push({ type, detail }),
   });
 
   try {
@@ -508,6 +545,7 @@ test("serves workspaces through a runtime isolated from terminal sessions", asyn
           id: "fixture",
           name: "Fixture",
           authMethods: ["api_key"],
+          loginMethods: ["api_key"],
           configured: true,
           source: "environment",
           subscription: false,
@@ -521,6 +559,110 @@ test("serves workspaces through a runtime isolated from terminal sessions", asyn
         maxProviders: 250,
       },
     });
+    const controllerA = randomUUID();
+    const controllerB = randomUUID();
+    const loginId = randomUUID();
+    const sessionId = sessionManager.getSessionId();
+    const loginRequest = (
+      controller: string,
+      action: string,
+      body: Record<string, unknown>,
+    ) =>
+      fetch(`${launched.origin}/api/providers/login/${action}`, {
+        method: "POST",
+        headers: { ...authorized, "X-OpenPI-Web-Controller": controller },
+        body: JSON.stringify(body),
+      });
+    const startBody = {
+      id: loginId,
+      sessionId,
+      providerId: "fixture",
+      method: "api_key",
+    };
+    assert.equal(
+      (
+        await loginRequest(controllerA, "start", {
+          ...startBody,
+          sessionId: "other",
+        })
+      ).status,
+      409,
+    );
+    assert.equal(
+      (await loginRequest(controllerA, "start", startBody)).status,
+      202,
+    );
+    assert.equal(
+      (await loginRequest(controllerB, "start", startBody)).status,
+      403,
+    );
+    assert.equal(
+      (await loginRequest(controllerA, "start", startBody)).status,
+      200,
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(loginCalls, 1);
+    const owned = await fetch(
+      `${launched.origin}/api/providers/login?sessionId=${sessionId}`,
+      {
+        headers: { ...authorized, "X-OpenPI-Web-Controller": controllerA },
+      },
+    );
+    const { logins: ownedLogins } = (await owned.json()) as {
+      logins: Array<{ prompt?: { id: string }; event?: { url: string } }>;
+    };
+    assert.equal(ownedLogins.length, 1);
+    assert.equal(
+      ownedLogins[0]?.event?.url,
+      "https://provider.example/auth?state=private-url",
+    );
+    const promptId = ownedLogins[0]?.prompt?.id;
+    assert.ok(promptId);
+    const other = await fetch(
+      `${launched.origin}/api/providers/login?sessionId=${sessionId}`,
+      {
+        headers: { ...authorized, "X-OpenPI-Web-Controller": controllerB },
+      },
+    );
+    assert.deepEqual(await other.json(), { logins: [] });
+    assert.equal(
+      (
+        await loginRequest(controllerB, "answer", {
+          id: loginId,
+          promptId,
+          value: loginSecret,
+        })
+      ).status,
+      403,
+    );
+    assert.equal(
+      (
+        await loginRequest(controllerA, "answer", {
+          id: loginId,
+          promptId,
+          value: loginSecret,
+        })
+      ).status,
+      200,
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(receivedSecret, loginSecret);
+    assert.equal(logins.get(loginId)?.status, "succeeded");
+    host.publish("provider_login_changed", { credential: loginSecret });
+    assert.doesNotMatch(
+      JSON.stringify(loginEvents),
+      /private-url|sk-private-fixture-value/u,
+    );
+    assert.doesNotMatch(
+      JSON.stringify(
+        await (
+          await fetch(`${launched.origin}/api/snapshot`, {
+            headers: authorized,
+          })
+        ).json(),
+      ),
+      /private-url|sk-private-fixture-value/u,
+    );
     for (const route of [
       "/api/thinking",
       "/api/trust",

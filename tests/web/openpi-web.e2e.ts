@@ -922,6 +922,8 @@ test("inspects session-scoped runtime and terminal details on desktop and mobile
 }, testInfo) => {
   const sessionId = "inspection-browser-session";
   const reads: string[] = [];
+  let login: Record<string, unknown> | null = null;
+  let loginCalls = 0;
   await page.route("**/api/snapshot**", async (route) => {
     const response = await route.fetch();
     const snapshot = await response.json();
@@ -987,7 +989,12 @@ test("inspects session-scoped runtime and terminal details on desktop and mobile
             : endpoint === "providers/auth-status"
               ? {
                   providers: [
-                    { id: "example", name: "Example", configured: true },
+                    {
+                      id: "example",
+                      name: "Example",
+                      configured: true,
+                      loginMethods: ["api_key"],
+                    },
                   ],
                   truncation: { truncated: false },
                 }
@@ -1015,6 +1022,48 @@ test("inspects session-scoped runtime and terminal details on desktop and mobile
       await route.fulfill({ json: body });
     });
   }
+  await page.route("**/api/providers/login?**", (route) =>
+    route.fulfill({ json: { logins: login ? [login] : [] } }),
+  );
+  await page.route("**/api/providers/login/start", (route) => {
+    loginCalls++;
+    const { id } = route.request().postDataJSON() as { id: string };
+    login = {
+      id,
+      sessionId,
+      workspace: "/inspection",
+      epoch: 1,
+      providerId: "example",
+      method: "api_key",
+      status: "awaiting-input",
+      expiresAt: Date.now() + 60_000,
+      event: {
+        type: "auth_url",
+        url: "https://provider.example/authorize?state=private-browser",
+      },
+      prompt: {
+        id: "d52d9050-19a2-4b0f-8a70-6e172531164e",
+        type: "secret",
+        message: "API key",
+      },
+    };
+    return route.fulfill({
+      status: 202,
+      json: { state: "accepted", view: login },
+    });
+  });
+  await page.route("**/api/providers/login/answer", (route) => {
+    expect(route.request().postDataJSON()).toMatchObject({
+      value: "sk-browser-private",
+    });
+    login = {
+      ...login,
+      status: "succeeded",
+      event: undefined,
+      prompt: undefined,
+    };
+    return route.fulfill({ json: { state: "accepted" } });
+  });
   await openWorkbench(page);
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 844 });
@@ -1049,6 +1098,34 @@ test("inspects session-scoped runtime and terminal details on desktop and mobile
     });
     await page.getByRole("button", { name: "关闭", exact: true }).click();
   }
+  await page.getByRole("button", { name: "运行状态", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "输入密钥" }).click();
+  await expect(
+    dialog.getByRole("link", { name: "打开服务商授权页面" }),
+  ).toHaveAttribute(
+    "href",
+    "https://provider.example/authorize?state=private-browser",
+  );
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.getByRole("textbox", { name: "描述任务" })).toBeVisible();
+  await page.getByRole("button", { name: "运行状态", exact: true }).click();
+  const recovered = page.getByRole("dialog");
+  await expect(recovered).toContainText("需要输入");
+  const secret = recovered.getByRole("textbox", { name: "API key" });
+  await expect(secret).toHaveAttribute("type", "password");
+  await secret.fill("sk-browser-private");
+  await recovered.getByRole("button", { name: "继续" }).click();
+  await expect(recovered).toContainText("已连接");
+  expect(loginCalls).toBe(1);
+  expect(
+    await page.evaluate(() => JSON.stringify([localStorage, sessionStorage])),
+  ).not.toContain("sk-browser-private");
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.screenshot({
+    path: testInfo.outputPath("provider-login-mobile.png"),
+    fullPage: true,
+  });
 });
 
 test("restores archived history without switching the active Session", async ({

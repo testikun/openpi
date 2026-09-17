@@ -4,9 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import type { AuthInteraction } from "@earendil-works/pi-ai";
 import { jsonByteLength } from "../../web/protocol/types.ts";
 import { PiWebRuntime } from "../../web/runtime/pi-runtime.ts";
 import { WebCleanupConfirmations } from "../../web/runtime/confirmation.ts";
+import { ProviderLogins } from "../../web/runtime/provider-login.ts";
 import {
   type WebRuntimeEvent,
   WebRuntimeRequestError,
@@ -105,6 +107,8 @@ type FakeAgentRuntime = {
 type PromptRuntimeHarness = {
   runtime: FakeAgentRuntime;
   cleanupConfirmations: WebCleanupConfirmations;
+  providerLogins: ProviderLogins;
+  loginEpoch: number;
   cleanupConfirmationRegistrations: Map<object, () => void>;
   listeners: Set<(event: WebRuntimeEvent) => void>;
   retainedRuntimes: Set<FakeAgentRuntime>;
@@ -160,6 +164,8 @@ type LifecycleRuntime = {
 type LifecycleHarness = {
   runtime: LifecycleRuntime;
   cleanupConfirmations: WebCleanupConfirmations;
+  providerLogins: ProviderLogins;
+  loginEpoch: number;
   cleanupConfirmationRegistrations: Map<object, () => void>;
   unsubscribeSession?: () => void;
   listeners: Set<(event: WebRuntimeEvent) => void>;
@@ -233,6 +239,8 @@ function lifecycleHarness(runtime: LifecycleRuntime) {
   ) as unknown as LifecycleHarness;
   harness.runtime = runtime;
   harness.cleanupConfirmations = new WebCleanupConfirmations(() => {});
+  harness.providerLogins = new ProviderLogins(() => {});
+  harness.loginEpoch = 0;
   harness.cleanupConfirmationRegistrations = new Map();
   harness.listeners = new Set();
   harness.retainedRuntimes = new Set();
@@ -274,6 +282,8 @@ function promptHarness(session: ReturnType<typeof promptSession>) {
   ) as unknown as PromptRuntimeHarness;
   harness.runtime = { session, dispose: async () => undefined };
   harness.cleanupConfirmations = new WebCleanupConfirmations(() => {});
+  harness.providerLogins = new ProviderLogins(() => {});
+  harness.loginEpoch = 0;
   harness.cleanupConfirmationRegistrations = new Map();
   harness.listeners = new Set();
   harness.retainedRuntimes = new Set();
@@ -519,6 +529,7 @@ test("provider auth projection is bounded and never serializes credentials", () 
     id: "provider-1",
     name: `${"n".repeat(159)}…`,
     authMethods: ["api_key"],
+    loginMethods: [],
     configured: true,
     source: "stored",
     subscription: false,
@@ -528,6 +539,88 @@ test("provider auth projection is bounded and never serializes credentials", () 
   assert.equal(projection.providers[1]?.subscription, true);
   assert.doesNotMatch(JSON.stringify(projection), /sk-must-never-reach-web/u);
   assert.doesNotMatch(JSON.stringify(projection), /label|token|secret/u);
+});
+
+test("provider login delegates credential ownership to Pi and rejects stale Session input", async () => {
+  const session = {
+    isStreaming: false,
+    sessionManager: { getSessionId: () => "session-a" },
+  };
+  let calls = 0;
+  let received = "";
+  const modelRuntime = {
+    getProviders: () => [
+      { id: "ambient", auth: { apiKey: {} } },
+      { id: "native", auth: { apiKey: { login: async () => undefined } } },
+    ],
+    login: async (
+      _provider: string,
+      _method: string,
+      interaction: AuthInteraction,
+    ) => {
+      calls++;
+      received = await interaction.prompt({ type: "secret", message: "Key" });
+      return { credential: "pi-owned-secret" };
+    },
+  };
+  const agentRuntime = {
+    cwd: "/workspace",
+    session,
+    services: { modelRuntime },
+  };
+  const runtime = Object.create(PiWebRuntime.prototype) as {
+    runtime: typeof agentRuntime;
+    hasSelectedWorkspace: boolean;
+    loginEpoch: number;
+    providerLogins: ProviderLogins;
+    inFlightRuntimes: Map<object, number>;
+    retainedRuntimes: Set<object>;
+    startProviderLogin: PiWebRuntime["startProviderLogin"];
+    answerProviderLogin: PiWebRuntime["answerProviderLogin"];
+    cancelProviderLogin: PiWebRuntime["cancelProviderLogin"];
+  };
+  runtime.runtime = agentRuntime;
+  runtime.hasSelectedWorkspace = true;
+  runtime.loginEpoch = 1;
+  runtime.providerLogins = new ProviderLogins(() => {});
+  runtime.inFlightRuntimes = new Map();
+  runtime.retainedRuntimes = new Set();
+  const id = "b531813e-c5d8-4888-8fc0-f59dd7f60be9";
+  const request = {
+    id,
+    sessionId: "session-a",
+    providerId: "native",
+    method: "api_key" as const,
+  };
+  assert.equal(
+    runtime.startProviderLogin({ ...request, sessionId: "old" }).state,
+    "stale",
+  );
+  assert.equal(
+    runtime.startProviderLogin({ ...request, providerId: "ambient" }).state,
+    "unsupported",
+  );
+  assert.equal(runtime.startProviderLogin(request).state, "accepted");
+  assert.equal(runtime.startProviderLogin(request).state, "replayed");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls, 1);
+  const prompt = runtime.providerLogins.get(id)?.prompt;
+  assert.ok(prompt);
+  assert.equal(
+    runtime.answerProviderLogin(id, prompt.id, "private-key"),
+    "accepted",
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(received, "private-key");
+  assert.equal(runtime.providerLogins.get(id)?.status, "succeeded");
+  assert.doesNotMatch(
+    JSON.stringify(runtime.providerLogins.list()),
+    /private-key|pi-owned-secret/u,
+  );
+  runtime.loginEpoch++;
+  assert.equal(runtime.answerProviderLogin(id, prompt.id, "again"), "stale");
+  assert.equal(runtime.cancelProviderLogin(id), "stale");
+  await runtime.providerLogins.close();
 });
 
 test("model selection and Session activation are serialized", async () => {

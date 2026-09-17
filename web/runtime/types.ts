@@ -6,6 +6,8 @@ import type {
 } from "../protocol/types.ts";
 import type { WebProjectTrustStatus } from "./trust-status.ts";
 import type { WebCleanupConfirmationRequest, WebConfirmationReceipt } from "./confirmation.ts";
+import type { AuthType } from "@earendil-works/pi-ai";
+import type { ProviderLoginView } from "./provider-login.ts";
 
 export type WebProviderAuthSource =
   | "stored"
@@ -19,6 +21,7 @@ export interface WebProviderAuthSummary {
   readonly id: string;
   readonly name: string;
   readonly authMethods: readonly ("api_key" | "oauth")[];
+  readonly loginMethods?: readonly AuthType[];
   readonly configured: boolean;
   readonly source?: WebProviderAuthSource;
   readonly subscription: boolean;
@@ -149,6 +152,15 @@ export interface WebRuntimeController {
   searchModels(query: string, limit?: number): WebModelSearchResult;
   listCommands?(): WebCommandDiscoveryResult;
   listProviderAuth?(): WebProviderAuthProjection;
+  listProviderLogins?(): readonly ProviderLoginView[];
+  startProviderLogin?(options: {
+    id: string;
+    sessionId: string;
+    providerId: string;
+    method: AuthType;
+  }): { state: "accepted" | "replayed" | "conflict" | "busy" | "stale" | "unsupported"; view?: ProviderLoginView };
+  answerProviderLogin?(id: string, promptId: string, value: string): "accepted" | "stale" | "invalid";
+  cancelProviderLogin?(id: string): "accepted" | "stale" | "already-settled";
   getThinkingState?(): WebThinkingProjection;
   setThinkingLevel?(
     level: string,
