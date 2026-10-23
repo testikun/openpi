@@ -99,6 +99,7 @@ const PARENT_ONLY_PI_PACKAGES = [
   "pi-intercom",
   "pi-web-access",
   "@injaneity/pi-computer-use",
+  "@openpi-experiments/maka-browser",
 ];
 const PARENT_ONLY_PACKAGE_DIRECTORIES = PARENT_ONLY_PI_PACKAGES.map(
   (name) => name.split("/").at(-1)!,
@@ -632,6 +633,13 @@ export const CHILD_EXCLUDED_TOOL_NAMES = [
   "plan_ready",
   // setup — configuration is a package-owned, parent-only choice
   "configure_my_pi_setup",
+  // optional Maka browser experiment — requires the initiating parent's Web tab
+  "browser_navigate",
+  "browser_snapshot",
+  "browser_click",
+  "browser_type",
+  "browser_wait",
+  "browser_extract",
 ] as const;
 
 const PARENT_ONLY_OPENPI_EXTENSION_PATHS = new Set(

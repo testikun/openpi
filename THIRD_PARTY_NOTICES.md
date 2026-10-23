@@ -1,5 +1,14 @@
 # Third-Party Notices
 
+The optional development package in `experiments/maka-browser/` adapts the six
+embedded-browser tool interfaces and behavior from
+[`apache/maka`](https://github.com/apache/maka), revision
+`173f1e7397ded73cdfc8f362e89858602e073ef4` (Apache-2.0). The upstream license and
+NOTICE are preserved in that directory. It uses unmodified
+[`@jackwener/opencli`](https://github.com/jackwener/OpenCLI) `1.8.6` (Apache-2.0)
+for its DOM engine through the package's public API. The experiment is not loaded
+by the ordinary OpenPI package.
+
 The embedded browser control operations in `web/browser-extension/computer-use.js`
 adapt the CDP element resolve/click/text/scroll pattern from
 [`@injaneity/pi-computer-use`](https://github.com/injaneity/pi-computer-use)

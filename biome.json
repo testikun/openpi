@@ -3,6 +3,7 @@
   "files": {
     "includes": [
       "extensions/**/*.ts",
+      "experiments/**/*.ts",
       "tests/**/*.ts",
       "extensions/**/*.cjs",
       ".github/actions/**/*.cjs",

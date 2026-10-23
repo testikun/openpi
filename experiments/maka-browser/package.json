@@ -1,0 +1,19 @@
+{
+  "name": "@openpi-experiments/maka-browser",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "dependencies": {
+    "@jackwener/opencli": "1.8.6"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=1.2.0",
+    "typebox": "*"
+  }
+}

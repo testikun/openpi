@@ -187,6 +187,7 @@ export async function controlBrowser(
         contextId: world.executionContextId,
         expression,
         returnByValue: true,
+        awaitPromise: true,
         timeout: 5000,
       });
       if (result.exceptionDetails)

@@ -280,6 +280,11 @@ See [SETUP.md](SETUP.md) for the full field reference and lifecycle details.
 
 Computer use is an optional native Pi package, `npm:@injaneity/pi-computer-use@0.5.1`. `/openpi-setup` reviews `computer_use_action=install` or `disable`; existing plugin preferences are preserved and loading changes only on an explicit reload or a new Session. `browser_default=embedded` (default) adapts those original tools to the initiating OpenPI tab, requiring `browser_control=true`, `browser_embedded=true` and [Browser Bridge](web/browser-extension/README.md) 0.5.0 in Chromium. An external `browser_default` runs the original desktop/browser plugin under its own Pi and OS permissions. `browser_external=[]` is retained only for legacy preference compatibility; it is not a native permission boundary. OpenPI no longer registers a separate browser tool or pairs external browser profiles. Embedded grants remain off by default.
 
+The development-only [Maka browser experiment](experiments/maka-browser/README.md)
+is a separate local Pi package for comparing six Maka-style browser tools and
+OpenCLI's DOM engine in an isolated profile. It is not enabled by the ordinary
+package or deployed over an existing user service.
+
 ## FAQ
 
 <details>

@@ -8,6 +8,8 @@ Research records preserve sourced investigation and distinguish observations, in
 
 ## Draft investigations
 
+- [`MAKA_BROWSER_EXPERIMENT_2026-10-23.md`](MAKA_BROWSER_EXPERIMENT_2026-10-23.md) — isolated six-tool Maka/OpenCLI browser package, real Chrome input and native-control limitations; live-model turns unavailable with provider 503 ([#169](https://github.com/openpi-dev/openpi/issues/169)).
+
 
 - [`WEB_TOOL_GROUP_DETAILS_2026-10-13.md`](WEB_TOOL_GROUP_DETAILS_2026-10-13.md) — 工具组摘要、图标、对齐和动态的 Codex 安装包 / PR #711 状态对照；保留 OpenPI 分组的可选精修，原生 Codex 动态仍未验证（[#597](https://github.com/openpi-dev/openpi/issues/597)、[PR #711](https://github.com/openpi-dev/openpi/pull/711)）。
 

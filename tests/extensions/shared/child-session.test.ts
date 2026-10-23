@@ -1910,6 +1910,19 @@ async function discoverRegisteredToolNames() {
     "../../../extensions",
   );
   const entries = await readdir(extensionsDir, { withFileTypes: true });
+  const sources = entries
+    .filter((entry) => entry.isDirectory() && entry.name !== "shared")
+    .map((entry) => ({
+      name: entry.name,
+      indexPath: path.join(extensionsDir, entry.name, "index.ts"),
+    }));
+  sources.push({
+    name: "maka-browser-experiment",
+    indexPath: path.resolve(
+      extensionsDir,
+      "../experiments/maka-browser/index.ts",
+    ),
+  });
   const names = new Set<string>();
   const factoryRegistrations: string[] = [];
   // Matches `registerTool(` then the first `name:` string literal after it.
@@ -1932,9 +1945,8 @@ async function discoverRegisteredToolNames() {
   // rather than silently ignoring it.
   const factoryHeadRe = /registerTool\s*\(\s*([A-Za-z_$][\w$]*)\s*\(/g;
   const defFactoryRe = /(create[A-Za-z]*ToolDefinition)\s*\(/;
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name === "shared") continue;
-    const indexPath = path.join(extensionsDir, entry.name, "index.ts");
+  for (const entry of sources) {
+    const indexPath = entry.indexPath;
     let source: string;
     try {
       source = await readFile(indexPath, "utf8");

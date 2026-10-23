@@ -41,6 +41,17 @@ export const OPENPI_TOOL_SURFACE = {
     resident: [],
     boundary: ["configure_my_pi_setup"],
   },
+  makaBrowser: {
+    resident: [],
+    boundary: [
+      "browser_navigate",
+      "browser_snapshot",
+      "browser_click",
+      "browser_type",
+      "browser_wait",
+      "browser_extract",
+    ],
+  },
 } as const;
 
 export type OpenPiToolOwner = keyof typeof OPENPI_TOOL_SURFACE;
@@ -75,6 +86,9 @@ export const OPENPI_OWNER_SOURCE_PATHS = {
   interaction: fileURLToPath(new URL("../ask-user/index.ts", import.meta.url)),
   plan: fileURLToPath(new URL("../plan-mode/index.ts", import.meta.url)),
   setup: fileURLToPath(new URL("../setup/index.ts", import.meta.url)),
+  makaBrowser: fileURLToPath(
+    new URL("../../experiments/maka-browser/index.ts", import.meta.url),
+  ),
 } as const satisfies Record<OpenPiToolOwner, string>;
 
 const states = new WeakMap<object, ToolSurfaceState>();
