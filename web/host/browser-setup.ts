@@ -3,24 +3,21 @@ import { access } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { EXTERNAL_BROWSERS, type ExternalBrowser } from "../../extensions/shared/browser-config.ts";
+import type { ExternalBrowser } from "../../extensions/shared/browser-config.ts";
+import { BROWSER_BRIDGE_VERSION } from "../protocol/browser.ts";
 
 const exec = promisify(execFile);
-export const BROWSER_EXTENSION_VERSION = "0.4.0";
+export const BROWSER_EXTENSION_VERSION = BROWSER_BRIDGE_VERSION;
 export const browserExtensionPath = fileURLToPath(new URL("../browser-extension/", import.meta.url));
-export const portableBrowserExtensionPath = fileURLToPath(new URL("../browser-extension-portable/", import.meta.url));
 const applications = {
   chrome: { mac: "Google Chrome", win: "Google/Chrome/Application/chrome.exe", linux: "google-chrome" },
   edge: { mac: "Microsoft Edge", win: "Microsoft/Edge/Application/msedge.exe", linux: "microsoft-edge" },
   brave: { mac: "Brave Browser", win: "BraveSoftware/Brave-Browser/Application/brave.exe", linux: "brave-browser" },
   chromium: { mac: "Chromium", win: "Chromium/Application/chrome.exe", linux: "chromium" },
-  safari: { mac: "Safari", win: "", linux: "" },
-  firefox: { mac: "Firefox", win: "Mozilla Firefox/firefox.exe", linux: "firefox" },
 } as const;
 
-async function application(browser: ExternalBrowser) {
+async function application(browser: keyof typeof applications) {
   const info = applications[browser];
-  if (browser === "safari" && process.platform !== "darwin") return undefined;
   if (process.platform === "linux") {
     try { return (await exec("which", [info.linux], { timeout: 1000 })).stdout.trim() || undefined; }
     catch { return undefined; }
@@ -34,16 +31,13 @@ async function application(browser: ExternalBrowser) {
   return undefined;
 }
 
-export async function installedBrowsers() {
-  return Promise.all(EXTERNAL_BROWSERS.map(async (id) => ({ id, installed: Boolean(await application(id)) })));
-}
-
 /** Explicit UI actions only. A launch receipt is never installation or permission evidence. */
-export async function browserSetupAction(browser: ExternalBrowser, action: "folder" | "manage" | "connect", origin: string) {
+export async function browserSetupAction(browser: ExternalBrowser, action: "folder" | "manage") {
+  if (browser === "safari" || browser === "firefox") throw new Error("Embedded Browser Bridge requires Chromium. Other browsers use the original Pi package directly.");
   if (action === "folder") {
     // Reveal the install target itself, rather than opening its JavaScript files.
-    const folder = browser === "safari" || browser === "firefox" ? portableBrowserExtensionPath : browserExtensionPath;
-    const target = browser === "firefox" ? join(folder, "manifest.json") : resolve(folder);
+    const folder = browserExtensionPath;
+    const target = resolve(folder);
     const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer.exe" : "xdg-open";
     const args = process.platform === "darwin" ? ["-R", target] : process.platform === "win32" ? [`/select,${target}`] : [dirname(target)];
     await exec(command, args, { timeout: 5000 });
@@ -51,7 +45,7 @@ export async function browserSetupAction(browser: ExternalBrowser, action: "fold
   }
   const app = await application(browser);
   if (!app) throw new Error("Browser not found in a standard installation location. Open OpenPI in that browser to connect it.");
-  const target = action === "connect" ? `${origin}/?settings=browser` : browser === "safari" ? undefined : browser === "firefox" ? "about:debugging#/runtime/this-firefox" : `${browser === "edge" ? "edge" : browser === "brave" ? "brave" : "chrome"}://extensions/`;
+  const target = `${browser === "edge" ? "edge" : browser === "brave" ? "brave" : "chrome"}://extensions/`;
   if (process.platform === "darwin") await exec("open", ["-a", app, ...(target ? [target] : [])], { timeout: 5000 });
   else {
     // Existing browser processes handle this launch. Avoid killing a newly started browser on timeout.

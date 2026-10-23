@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync, unlinkSync } from "node:fs";
 import { readConfiguredPackages } from "./configured-packages.ts";
+import { adaptComputerUseExtensions, loadedComputerUseStatus } from "./computer-use.ts";
 import { getSessionChildExecutionAdmission } from "../../extensions/shared/child-execution-admission.ts";
 import { mkdir, readdir, realpath, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -809,6 +810,11 @@ export class PiWebRuntime implements WebRuntimeController {
     this.assertWorkspaceSelected();
     return projectWebSettingsResources(this.runtime.services.resourceLoader,
       readConfiguredPackages(this.cwd, this.runtime.services.agentDir, this.runtime.session.settingsManager.isProjectTrusted()));
+  }
+
+  getComputerUseStatus() {
+    this.assertActive();
+    return loadedComputerUseStatus(this.runtime.services.resourceLoader.getExtensions());
   }
 
   getWebSearchSupport() {
@@ -2552,6 +2558,7 @@ export class PiWebRuntime implements WebRuntimeController {
         modelRuntimeSignal: AbortSignal.timeout(STARTUP_TIMEOUT_MS),
         resourceLoaderOptions: {
           eventBus,
+          extensionsOverride: adaptComputerUseExtensions,
           extensionFactories: [
             ...createPiBuiltinExtensionFactories(),
             commandDiscovery.extension,

@@ -20,6 +20,13 @@
       { source: "openpi-browser-extension", ...message },
       location.origin,
     );
+  const version = chrome.runtime.getManifest().version;
+  document.documentElement.dataset.openpiBrowserBridgeVersion = version;
+  const hello = () => emit({ type: "connector-hello", version });
+  // Presence enables launch_browser before the first iframe exists. It does
+  // not install DNR rules or acquire debugger authority until a page opens.
+  setInterval(hello, 5000);
+  hello();
   const status = (value) => {
     document.documentElement.dataset.openpiBrowserExtension = value;
   };
@@ -75,6 +82,13 @@
     }
   }
   window.addEventListener("message", (event) => {
+    if (
+      event.source === window &&
+      event.origin === location.origin &&
+      event.data?.source === "openpi-browser-ui" &&
+      event.data.type === "connector-probe"
+    )
+      hello();
     if (!port || !event.data || typeof event.data !== "object") return;
     if (
       event.data.source === "openpi-frame-identify" &&

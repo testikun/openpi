@@ -62,7 +62,6 @@ import {
   sessionReadingScope,
 } from "../features/transcript/session-reading-state.ts";
 import { Transcript } from "../features/transcript/Transcript.tsx";
-import { useBrowserConnector } from "../features/workbar/browser-connector.ts";
 import { useBrowserControl } from "../features/workbar/browser-control.ts";
 import { SessionUsageBar } from "../features/workbar/SessionUsageBar.tsx";
 import type { WorkbarTool } from "../features/workbar/types.ts";
@@ -97,7 +96,6 @@ function clamp(value: number, min: number, max: number) {
 }
 
 export function App() {
-  useBrowserConnector();
   const state = useStore(webStore);
   const { t } = useTranslation();
   const { actions } = state;

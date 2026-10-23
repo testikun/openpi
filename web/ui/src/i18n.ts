@@ -926,6 +926,30 @@ const resources = {
         "Help me change the search service for my installed Pi Web Access plugin. Explain available services and permissions, preserve unrelated preferences, keep credentials with the search plugin, and do not reload automatically.",
       browserSettingsIntro:
         "Let OpenPI read pages, click, type and take screenshots.",
+      computerUseIntro:
+        "Use the original pi-computer-use tools for embedded pages and ordinary desktop applications.",
+      computerUseLoaded: "Original plugin loaded in this Session",
+      computerUseNotLoaded: "Original plugin not loaded in this Session",
+      computerUseInstall: "Install or enable plugin…",
+      computerUseDisable: "Disable plugin…",
+      computerUseInstallRequest:
+        "Install and enable npm:@injaneity/pi-computer-use@0.5.1 through computer_use_action=install. Let me review its native installation and desktop/browser/file permissions. Preserve existing plugin preferences and do not reload automatically.",
+      computerUseDisableRequest:
+        "Disable the original pi-computer-use package through computer_use_action=disable. Preserve its preferences and history; do not reload automatically.",
+      computerUseReloadHint:
+        "Installation changes Pi configuration. Apply it by explicitly reloading resources in Plugins while idle, or starting a new Session.",
+      computerUseMode: "Operate in",
+      computerUseNative: "Desktop and ordinary browsers",
+      computerUseNativeHint:
+        "Uses the original plugin and OS permissions. Some operations activate windows or use the system mouse and keyboard. Browser Bridge is not required.",
+      computerUseEmbeddedHint:
+        "Uses the same original tools, scoped to pages in the initiating OpenPI tab. Requires the plugin and Browser Bridge.",
+      computerUseEmbeddedPermission: "Allow embedded page control",
+      computerUseEmbeddedPermissionHint:
+        "Allows reading, clicking, typing and attaching selected local files to these pages. Changes go through OpenPI setup.",
+      computerUseBridgeReady: "Embedded bridge ready",
+      computerUseBridgeConnectHint:
+        "After adding or updating the extension, refresh this OpenPI page. The bridge connects when you open an embedded page.",
       browserControl: "Browser control",
       browserControlHint:
         "Requests a setup change. Access changes after the configuration is saved.",
@@ -1060,7 +1084,7 @@ const resources = {
       browserReloadHint:
         "Already installed? Reload OpenPI Browser Bridge in the extension manager and refresh OpenPI. Accept the browser’s permission prompt if shown.",
       browserSupportedHint:
-        "Chrome, Edge, Brave and Chromium 145+ support embedded and native pages. Safari 26+ on macOS and Firefox 128+ use the portable extension for native tabs; nested frames must be opened separately. Temporary Safari/Firefox installations need reloading after browser restart.",
+        "Embedded pages require Chrome, Edge, Brave or Chromium 145+. Native browsers and desktop applications use the original pi-computer-use plugin and its OS permissions.",
       browserCopyPath: "Copy path",
       browserOpening: "Opening browser…",
       browserLoading: "Checking browser connections…",
@@ -3007,6 +3031,30 @@ const resources = {
       webSearchProviderRequest:
         "帮我更换已安装 Pi Web Access 插件的搜索服务。介绍可用服务与权限，保留无关偏好，密钥留在搜索插件中，不要自动重新加载。",
       browserSettingsIntro: "让 OpenPI 阅读网页、点击、输入和截图。",
+      computerUseIntro:
+        "内置页面与普通桌面应用统一使用原版 pi-computer-use 工具。",
+      computerUseLoaded: "本会话已加载原版插件",
+      computerUseNotLoaded: "本会话尚未加载原版插件",
+      computerUseInstall: "安装或启用插件…",
+      computerUseDisable: "禁用插件…",
+      computerUseInstallRequest:
+        "通过 computer_use_action=install 安装并启用 npm:@injaneity/pi-computer-use@0.5.1。让我审阅原生安装及桌面、浏览器和文件操作权限。保留已有插件偏好，不要自动重新加载。",
+      computerUseDisableRequest:
+        "通过 computer_use_action=disable 禁用原版 pi-computer-use 插件。保留偏好和历史记录，不要自动重新加载。",
+      computerUseReloadHint:
+        "安装只更改 Pi 配置。空闲时在「插件」页明确重新加载，或新建会话后生效。",
+      computerUseMode: "操作范围",
+      computerUseNative: "系统应用与普通浏览器",
+      computerUseNativeHint:
+        "直接使用原版插件及系统权限。部分操作会激活窗口、使用系统键鼠，无需 Browser Bridge。",
+      computerUseEmbeddedHint:
+        "沿用同一套原版工具，操作限于发起请求的 OpenPI 标签内页面。需要原版插件与 Browser Bridge。",
+      computerUseEmbeddedPermission: "允许控制内置页面",
+      computerUseEmbeddedPermissionHint:
+        "允许读取、点击、输入及向这些页面添加选定的本地文件。通过 OpenPI 设置保存授权。",
+      computerUseBridgeReady: "内置页面桥接已就绪",
+      computerUseBridgeConnectHint:
+        "添加或更新扩展后，刷新当前 OpenPI 页面。打开内置页面后，桥接会自动连接。",
       browserControl: "浏览器控制",
       browserControlHint: "提交设置变更请求，保存配置后生效。",
       browserDefault: "默认浏览器",
@@ -3133,7 +3181,7 @@ const resources = {
       browserReloadHint:
         "已安装旧版？在扩展页重新加载 OpenPI Browser Bridge，再刷新 OpenPI。如浏览器提示权限，请完成其原生确认。",
       browserSupportedHint:
-        "Chrome、Edge、Brave、Chromium 145+ 可控制内置页面及普通标签。macOS Safari 26+、Firefox 128+ 通过兼容扩展控制普通标签，嵌套框架需单独打开。Safari、Firefox 的临时安装需在浏览器重启后重新加载。",
+        "内置页面需要 Chrome、Edge、Brave 或 Chromium 145+。普通浏览器和桌面应用使用原版 pi-computer-use 插件及其系统权限。",
       browserCopyPath: "复制路径",
       browserOpening: "正在打开浏览器…",
       browserLoading: "正在检查浏览器连接…",

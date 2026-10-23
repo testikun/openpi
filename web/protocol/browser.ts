@@ -1,20 +1,10 @@
-import type { BrowserConfig, ExternalBrowser } from "../../extensions/shared/browser-config.ts";
+import type { BrowserConfig } from "../../extensions/shared/browser-config.ts";
 
-export interface BrowserProfile {
-  id: string;
-  browser: ExternalBrowser;
-  profileId: string;
-  extensionId: string;
-  version: string;
-  connected: boolean;
-  current: boolean;
-}
+export const BROWSER_BRIDGE_VERSION = "0.5.0";
 
 export interface BrowserSettingsStatus {
   config: BrowserConfig;
-  profiles: BrowserProfile[];
-  browsers: { id: ExternalBrowser; installed: boolean }[];
   extensionPath: string;
-  portableExtensionPath?: string;
   extensionVersion: string;
+  computerUse?: { loaded: boolean; version?: string };
 }

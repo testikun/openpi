@@ -1614,6 +1614,8 @@ test("child package snapshot handles canonical and historical package Git source
       "git:git@github.com:nicobailon/pi-intercom@feature/test",
       "npm:pi-web-access@0.38.0",
       "git:github.com/nicobailon/pi-web-access@v0.38.0",
+      "npm:@injaneity/pi-computer-use@0.5.1",
+      "git:github.com/injaneity/pi-computer-use@main",
     ];
     const openPiSources = [
       "git:github.com/openpi-dev/openpi",
@@ -1663,57 +1665,58 @@ test("child package snapshot handles canonical and historical package Git source
   });
 });
 
-test("web access local package and renamed tools stay out of children before execution", async () => {
-  await withTempDir(async (directory) => {
-    const cwd = path.join(directory, "project");
-    const agentDir = path.join(directory, "agent");
-    const source = path.join(directory, "renamed-checkout");
-    const marker = path.join(directory, "executed");
-    await mkdir(cwd);
-    await mkdir(agentDir);
-    await mkdir(source);
-    await writeFile(
-      path.join(source, "package.json"),
-      JSON.stringify({
-        name: "pi-web-access",
-        version: "0.38.0",
-        pi: { extensions: ["index.ts"] },
-      }),
-    );
-    await writeFile(
-      path.join(source, "index.ts"),
-      `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(marker)}, "executed"); export default function () {}`,
-    );
-    const settingsPath = path.join(agentDir, "settings.json");
-    const bytes = JSON.stringify({ packages: [source] });
-    await writeFile(settingsPath, bytes);
-    const child = await createChildResources({
-      cwd,
-      agentDir,
-      projectTrusted: true,
-    });
-    assert.deepEqual(child.settingsManager.getGlobalSettings().packages, []);
-    await assert.rejects(readFile(marker), { code: "ENOENT" });
-    assert.equal(await readFile(settingsPath, "utf8"), bytes);
-    assert.deepEqual(
-      inheritedChildToolAllowlist(["renamed_search"], undefined, {
+test("parent-only local packages and renamed tools stay out of children before execution", async () => {
+  for (const name of ["pi-web-access", "@injaneity/pi-computer-use"])
+    await withTempDir(async (directory) => {
+      const cwd = path.join(directory, "project");
+      const agentDir = path.join(directory, "agent");
+      const source = path.join(directory, "renamed-checkout");
+      const marker = path.join(directory, "executed");
+      await mkdir(cwd);
+      await mkdir(agentDir);
+      await mkdir(source);
+      await writeFile(
+        path.join(source, "package.json"),
+        JSON.stringify({
+          name,
+          version: "0.38.0",
+          pi: { extensions: ["index.ts"] },
+        }),
+      );
+      await writeFile(
+        path.join(source, "index.ts"),
+        `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(marker)}, "executed"); export default function () {}`,
+      );
+      const settingsPath = path.join(agentDir, "settings.json");
+      const bytes = JSON.stringify({ packages: [source] });
+      await writeFile(settingsPath, bytes);
+      const child = await createChildResources({
         cwd,
-        availableTools: [
-          {
-            name: "renamed_search",
-            sourceInfo: {
-              path: path.join(source, "index.ts"),
-              source,
-              scope: "user",
-              origin: "package",
-              baseDir: source,
+        agentDir,
+        projectTrusted: true,
+      });
+      assert.deepEqual(child.settingsManager.getGlobalSettings().packages, []);
+      await assert.rejects(readFile(marker), { code: "ENOENT" });
+      assert.equal(await readFile(settingsPath, "utf8"), bytes);
+      assert.deepEqual(
+        inheritedChildToolAllowlist(["renamed_search"], undefined, {
+          cwd,
+          availableTools: [
+            {
+              name: "renamed_search",
+              sourceInfo: {
+                path: path.join(source, "index.ts"),
+                source,
+                scope: "user",
+                origin: "package",
+                baseDir: source,
+              },
             },
-          },
-        ],
-      }),
-      [],
-    );
-  });
+          ],
+        }),
+        [],
+      );
+    });
 });
 
 test("unverifiable local package identities fail closed before factory execution", async () => {
@@ -1721,6 +1724,7 @@ test("unverifiable local package identities fail closed before factory execution
     { directoryName: "local-package-checkout", manifest: "{ invalid json" },
     { directoryName: "pi-intercom", manifest: undefined },
     { directoryName: "pi-web-access", manifest: undefined },
+    { directoryName: "pi-computer-use", manifest: undefined },
   ]) {
     await withTempDir(async (directory) => {
       const cwd = path.join(directory, "project");
@@ -2015,11 +2019,20 @@ const KNOWN_FACTORY_TOOLS: Record<
 test("every registered package tool is classified child-safe or excluded (fail-closed drift guard)", async () => {
   const { names: registered, factoryRegistrations } =
     await discoverRegisteredToolNames();
-  // Sanity: the scan must actually find tools, or the guard is vacuous.
-  assert.ok(
-    registered.size >= 15,
-    `expected to discover the package tools, found ${registered.size}`,
+  // Every declared inline tool must be discovered; an obsolete count cannot
+  // establish this after retiring an optional package's duplicate interface.
+  const factoryNames = new Set(
+    Object.values(KNOWN_FACTORY_TOOLS).map(({ tool }) => tool),
   );
+  for (const name of [
+    ...CHILD_EXCLUDED_TOOL_NAMES,
+    ...CHILD_SAFE_PACKAGE_TOOL_NAMES,
+  ])
+    if (!factoryNames.has(name))
+      assert.ok(
+        registered.has(name),
+        `scan must discover classified tool ${name}`,
+      );
   assert.ok(
     registered.has("subagent_spawn"),
     "scan should find subagent_spawn",

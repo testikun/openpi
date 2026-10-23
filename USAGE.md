@@ -266,7 +266,7 @@ Skill 正文通过原生用户消息或工具结果进入正常 Session 历史�
 
 ## 模型工具速查
 
-OpenPI 提供一套固定的常驻模型工具，在 Session 开始时确定一次：Subagent（`subagent_spawn` 等 5 个）与 Workflow（`workflow`/`workflow_stop`/`workflow_status`），共 8 个。会话内工具列表不因模型动作或运行时状态改变；缺少对应状态的调用在执行层返回明确结果或 fail-closed。只有用户显式边界会改变工具：`/plan` 加入只读 Git、`plan_ready` 与 `ask_user`/`human_handoff`；`/openpi-setup` episode 加入 `configure_my_pi_setup` 与 `ask_user`/`human_handoff`；浏览器授权后启用 `openpi_browser`。Subagent 与 Workflow 的 Skill 文件仍随包发布，模型按需用 `read` 读取，不常驻普通系统 Prompt。
+OpenPI 提供一套固定的常驻模型工具，在 Session 开始时确定一次：Subagent（`subagent_spawn` 等 5 个）与 Workflow（`workflow`/`workflow_stop`/`workflow_status`），共 8 个。会话内工具列表不因模型动作或运行时状态改变；缺少对应状态的调用在执行层返回明确结果或 fail-closed。只有用户显式边界会改变工具：`/plan` 加入只读 Git、`plan_ready` 与 `ask_user`/`human_handoff`；`/openpi-setup` episode 加入 `configure_my_pi_setup` 与 `ask_user`/`human_handoff`。可选 Computer Use 由原版 Pi 插件注册 11 个工具；OpenPI 不再注册第二套浏览器工具。Subagent 与 Workflow 的 Skill 文件仍随包发布，模型按需用 `read` 读取，不常驻普通系统 Prompt。
 
 普通产品采用 Pi-native execution：保留 Pi 原生完整历史、工具输出上限、Session compaction、显式 Bash timeout 与 provider loop，不额外做固定事务投影、成功 Bash 二次裁剪、测试 timeout 改写、重复失败硬拦或恢复/轨迹提示。与 Pi 相同，OpenPI 不提供删除保护：Bash 中的 `rm` 完全沿用 Pi 自身行为，不做 provenance 检查或确认拦截。
 
@@ -278,7 +278,6 @@ OpenPI 提供一套固定的常驻模型工具，在 Session 开始时确定一�
 | `plan_ready`                                                                                             | 显式完成计划，不自动开始实施   | Plan Mode 进行中                 |
 | `git_show`, `git_diff`, `git_log`                                                                        | 只读 Git 检查                  | Plan Mode 进行中                 |
 | `configure_my_pi_setup`                                                                                  | 受限配置写入                   | `/openpi-setup` 进行中           |
-| `openpi_browser`                                                                                         | 授权浏览器控制                 | Setup 授权后                     |
 
 ## /usage 订阅额度
 
@@ -296,7 +295,7 @@ TUI 查询中按 Esc/Ctrl+C 取消等待；结果使用可滚动浮层，方向�
 
 ## 浏览器控制
 
-浏览器控制使用可选的 [OpenPI Browser Bridge](web/browser-extension/README.md) 0.4.0，需浏览器原生安装及权限确认。Chromium 系继续适配 pi-computer-use 0.5.1 的 CDP 路径，Safari／Firefox 使用按文档绑定的 WebExtension 接口；无需修改 Pi 内核、fork 或安装完整桌面 pi-computer-use。模型使用一个父 Session 专属的 `openpi_browser`：未指定浏览器时使用用户默认值，明确指定 Chrome 等名称时只使用该浏览器；未授权、离线、多配置歧义均返回明确错误，不自动换浏览器。内置页面绑定发起 Turn 的 OpenPI 标签；普通浏览器使用已连接配置中的现有页面和登录状态，需在对应配置中保留 OpenPI 标签。授权不会复制 Cookie 或用户配置。关闭授权、取消 Turn 或更换文档后旧观察失效，已发送但未确认的效果按不确定报告。部分站点仍会限制嵌入；Safari／Firefox 的读取基于 DOM 语义，嵌套框架需单独打开。
+Computer Use 统一使用原版 `npm:@injaneity/pi-computer-use@0.5.1` 提供的 `find_roots`、`observe_ui`、`search_ui`、`expand_ui`、`inspect_ui`、`act_ui`、`read_text`、`wait_for`、`launch_browser`、`navigate_browser` 和 `evaluate_browser`。通过 `/openpi-setup` 的 `computer_use_action=install/disable` 审阅原生安装与桌面、浏览器和文件权限，保留已有偏好，不自动重新加载。普通模式直接执行原版插件。内置模式只替换执行后端，参数 Schema 原样保留；需要 [Browser Bridge](web/browser-extension/README.md) 0.5.0 和内置页面授权。内置目标绑定发起 Turn 的 OpenPI 标签、页面及文档，取消、撤权或文档改变后旧写入状态失效。普通浏览器不再通过 OpenPI 扩展配对配置或枚举标签。
 
 ## Web 工作台细节
 
@@ -423,7 +422,7 @@ Web 外观将模式与配色分开：`ui.webTheme` 的新模式选择为 `system
 
 Plan 模式下需先退出规划，再通过 `/openpi-setup` 修改配置。Web 设置页会禁用相关修改入口，并在会话空闲时提供退出按钮；退出仅切换状态，不调用模型或开始实施。Setup 在接收命令和投递排队请求时都检查当前 Session 的 Plan 状态。设置页依据实际工具回执反馈保存、设置未变化、失败或取消；回合结束或模型声称成功都不能替代保存回执。
 
-浏览器模型控制默认关闭。Web「设置 → 浏览器」提供安装引导和连接检查；总开关、逐个浏览器授权及默认浏览器选择会提交 `/openpi-setup` 请求，由当前模型在设置流程中通过配置工具保存。也可直接用 `/openpi-setup` 设置 `browser_control`、`browser_embedded`、`browser_default`、`browser_external`。默认值依次为 `false`、`true`、`embedded`、`[]`：总开关关闭时所有模型浏览器操作都被拒绝，普通 iframe 浏览不受影响。请求受理不代表配置已保存；控件以实际持久化状态为准。
+内置页面的模型控制默认关闭。「设置 → 浏览器」提供原版插件安装审阅、操作范围及 Chromium 桥接引导。授权与范围通过 `/openpi-setup` 保存：`browser_control=false`、`browser_embedded=true`、`browser_default=embedded` 为默认值；外部 `browser_default` 直接使用原版插件及其 Pi／系统权限。`browser_external=[]` 仅保留旧偏好兼容，不是原生控制权限边界。请求受理不代表保存或加载完成；明确重新加载或新建会话才应用插件加载变化。撤销内置授权立即阻断后续内置操作，普通 iframe 浏览不受影响。
 
 普通浏览器可选择 `chrome`、`edge`、`brave`、`chromium`、`safari`、`firefox`。安装引导可打开独立窗口，在支持 Document Picture-in-Picture 的浏览器中浮动显示，其他浏览器使用普通弹窗。步骤中的圈选是操作示意；浏览器管理页仍由浏览器自身管理。Safari 26+（macOS）和 Firefox 128+ 使用随包提供的兼容扩展控制普通标签，内置控制仍需要 Chromium 系浏览器。开发安装为临时扩展，重启后需要重新加载；正式一键安装需要另行发布签名扩展。
 

@@ -368,6 +368,7 @@ export interface WebRuntimeController {
   searchModels(query: string, limit?: number, provider?: string): WebModelSearchResult;
   listCommands?(): WebCommandDiscoveryResult;
   listSettingsResources?(): WebSettingsResourceCatalog;
+  getComputerUseStatus?(): { loaded: boolean; version?: string };
   getWebSearchSupport?(): { available: boolean; reason?: string; model?: string; provider?: string };
   getResponseSupport?(): { verbosity: boolean; reasoningSummary: boolean };
   applySetupConfiguration?(): Promise<void>;

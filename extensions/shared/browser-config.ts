@@ -15,6 +15,7 @@ export interface BrowserConfig {
   readonly control: boolean;
   readonly embedded: boolean;
   readonly defaultBrowser: BrowserId;
+  /** Retained legacy preferences; the original Pi plugin owns native authority. */
   readonly externalBrowsers: readonly ExternalBrowser[];
 }
 
@@ -26,12 +27,3 @@ export const isBrowserList = (value: unknown): value is ExternalBrowser[] =>
   Array.isArray(value) &&
   value.every(isExternalBrowser) &&
   new Set(value).size === value.length;
-
-export function browserAllowed(config: BrowserConfig, browser: BrowserId) {
-  return (
-    config.control &&
-    (browser === "embedded"
-      ? config.embedded
-      : config.externalBrowsers.includes(browser))
-  );
-}

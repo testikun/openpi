@@ -65,6 +65,7 @@ export const CHILD_READ_DERIVED_TOOL_NAMES = [
  * silently at the child boundary so a stale entry cannot fail preflight.
  */
 export const RETIRED_OPENPI_TOOL_NAMES = new Set<string>([
+  "openpi_browser",
   "fd",
   "rg",
   "runtime_snapshot",
@@ -94,7 +95,14 @@ export const RETIRED_OPENPI_TOOL_NAMES = new Set<string>([
  * Loading it in children can therefore cross-wire identities; the parent
  * extension remains loaded and fully usable.
  */
-const PARENT_ONLY_PI_PACKAGES = ["pi-intercom", "pi-web-access"];
+const PARENT_ONLY_PI_PACKAGES = [
+  "pi-intercom",
+  "pi-web-access",
+  "@injaneity/pi-computer-use",
+];
+const PARENT_ONLY_PACKAGE_DIRECTORIES = PARENT_ONLY_PI_PACKAGES.map(
+  (name) => name.split("/").at(-1)!,
+);
 
 function manifestNamesParentOnlyPackage(manifestPath: string) {
   try {
@@ -123,7 +131,9 @@ function installedPathNamesParentOnlyPackage(installedPath: string) {
       if (existsSync(manifestPath)) {
         return manifestNamesParentOnlyPackage(manifestPath);
       }
-      if (PARENT_ONLY_PI_PACKAGES.includes(path.basename(installedPath))) {
+      if (
+        PARENT_ONLY_PACKAGE_DIRECTORIES.includes(path.basename(installedPath))
+      ) {
         throw new Error(
           `Cannot verify child package identity from ${installedPath}`,
         );
@@ -139,7 +149,7 @@ function installedPathNamesParentOnlyPackage(installedPath: string) {
     let current = path.dirname(installedPath);
     let hasParentOnlyDirectoryName = false;
     while (true) {
-      hasParentOnlyDirectoryName ||= PARENT_ONLY_PI_PACKAGES.includes(
+      hasParentOnlyDirectoryName ||= PARENT_ONLY_PACKAGE_DIRECTORIES.includes(
         path.basename(current),
       );
       const manifestPath = path.join(current, "package.json");
@@ -192,6 +202,10 @@ function piMatchesPublishedParentOnlySource(options: {
     packageManager.removeSourceFromSettings("npm:pi-web-access") ||
     packageManager.removeSourceFromSettings(
       "git:https://github.com/nicobailon/pi-web-access",
+    ) ||
+    packageManager.removeSourceFromSettings("npm:@injaneity/pi-computer-use") ||
+    packageManager.removeSourceFromSettings(
+      "git:https://github.com/injaneity/pi-computer-use",
     )
   );
 }
@@ -601,8 +615,6 @@ async function createChildSettingsManager(options: {
  * drift test in child-session.test.ts).
  */
 export const CHILD_EXCLUDED_TOOL_NAMES = [
-  // embedded browser — authority belongs to the initiating parent Web tab
-  "openpi_browser",
   // subagents — children cannot spawn/observe more agents
   "subagent_spawn",
   "subagent_wait",

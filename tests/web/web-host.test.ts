@@ -66,7 +66,7 @@ after(async () => {
   await rm(hostAgentDirectory, { recursive: true, force: true });
 });
 
-test("browser preferences require setup and native credentials cannot authorize Web APIs", async () => {
+test("browser preferences require setup and retired external transports cannot acquire Web authority", async () => {
   const path = join(hostAgentDirectory, "my-pi-setup.json");
   const before = await readFile(path, "utf8").catch(() => undefined);
   const cwd = await mkdtemp(join(tmpdir(), "openpi-browser-host-"));
@@ -144,74 +144,33 @@ test("browser preferences require setup and native credentials cannot authorize 
         externalBrowsers: ["chrome"],
       },
     }));
-    const identity = {
-      browser: "chrome",
-      profileId: controller,
-      extensionId: "a".repeat(32),
-      version: "0.3.0",
-    };
     assert.equal(
-      (
-        await post("/api/browser/connections", {
-          ...identity,
-          browser: "unknown",
-        })
-      ).status,
-      400,
+      (await post("/api/browser/connections", { browser: "chrome" })).status,
+      410,
     );
-    const paired = await post("/api/browser/connections", identity);
-    assert.equal(paired.status, 200);
-    const connection = await paired.json();
-    const scoped = {
-      Authorization: `Bearer ${connection.token}`,
-      Origin: `chrome-extension://${identity.extensionId}`,
-    };
-    const route = `/api/browser/native?connectionId=${connection.connectionId}`;
     assert.equal(
-      (
-        await post(
-          route,
-          { pages: [] },
-          { ...scoped, Origin: "https://foreign.example" },
-        )
-      ).status,
-      401,
+      (await post("/api/browser/native?connectionId=retired", { pages: [] }))
+        .status,
+      410,
     );
-    assert.equal((await post(route, { pages: [] }, scoped)).status, 200);
-    const page = {
-      id: "wrong-connection/1",
-      document: controller,
-      title: "No",
-      url: "https://example.com/",
+    const retiredCredential = {
+      Authorization: `Bearer ${"b".repeat(64)}`,
+      Origin: "chrome-extension://" + "a".repeat(32),
     };
-    assert.equal((await post(route, { pages: [page] }, scoped)).status, 400);
-    const nativePage = {
-      ...page,
-      id: `${connection.connectionId}/123`,
-      document: "C172E720FA2F839B12DE8D2D9E5709F0",
-    };
-    assert.equal(
-      (await post(route, { pages: [nativePage] }, scoped)).status,
-      200,
-    );
     assert.equal(
       (
         await fetch(`${launched.origin}/api/snapshot`, {
-          headers: { Authorization: scoped.Authorization },
+          headers: { Authorization: retiredCredential.Authorization },
         })
       ).status,
       401,
-    );
-    assert.equal(
-      (await post("/api/settings/browser", { control: false }, scoped)).status,
-      403,
     );
     assert.equal(
       (
         await post(
           "/api/settings/browser/action",
           { browser: "chrome", action: "folder" },
-          scoped,
+          retiredCredential,
         )
       ).status,
       403,
@@ -224,8 +183,10 @@ test("browser preferences require setup and native credentials cannot authorize 
       browser: { ...current.browser, control: false },
     }));
     host.publish("settings_changed", {});
-    const polling = await post(route, { pages: [] }, scoped);
-    assert.equal((await polling.json()).enabled, false);
+    const polling = await post("/api/browser/native?connectionId=retired", {
+      pages: [],
+    });
+    assert.equal(polling.status, 410);
     assert.equal(applied, 0);
     assert.equal(prompted, 0);
   } finally {

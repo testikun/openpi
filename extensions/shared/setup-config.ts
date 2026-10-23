@@ -1695,8 +1695,9 @@ export function formatSetupConfig(config = loadSetupConfig()) {
   return [
     `Code Mode default: ${config.codeMode.enabled ? "on" : "off"} · Pi native codemode in CLI and Web parents · native tool selections take precedence · children retain inherited tool limits`,
     suggestions,
-    `Browser control: ${config.browser.control ? "on" : "off"} · default ${config.browser.defaultBrowser} · embedded ${config.browser.embedded ? "allowed" : "blocked"} · external ${config.browser.externalBrowsers.join(", ") || "none"}`,
-    `Browser choices: embedded (Chromium host), ${EXTERNAL_BROWSERS.join(", ")}; Safari/Firefox use native tabs.`,
+    `Browser control: ${config.browser.control ? "on" : "off"} · default ${config.browser.defaultBrowser} · embedded ${config.browser.embedded ? "allowed" : "blocked"} · legacy external ${config.browser.externalBrowsers.join(", ") || "none"}`,
+    "Computer use: original Pi package @injaneity/pi-computer-use@0.5.1; computer_use_action=install/disable reviews native installation. Embedded uses Browser Bridge; external defaults use the original native backend. Loading changes only on explicit reload or a new Session.",
+    `Browser backends: embedded (Chromium host) or native (original Pi package); legacy native selections: ${EXTERNAL_BROWSERS.join(", ")}.`,
     `Web search: ${config.webSearch.enabled ? "on" : "off"} · current Session model and Pi credentials · unsupported or unknown connections receive no search tool · ${config.webSearch.modelSupport.length} explicit model support declarations · no search-provider fallback`,
     `Response preferences: verbosity ${config.response.verbosity} · reasoning summary ${config.response.reasoningSummary} · Responses APIs only; default preserves Pi's request`,
     `Hidden Web thinking levels: ${config.ui.webHiddenThinkingLevels.join(", ") || "none"} · presentation only; native support and current effort are unchanged`,

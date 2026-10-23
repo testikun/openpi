@@ -16,8 +16,9 @@ writeFileSync(
   join(directory, "my-pi-setup.json"),
   JSON.stringify({ browser: { control: true } }),
 );
-const { WebBrowserBroker, validBrowserPages, validBrowserIdentity } =
-  await import("../../web/host/browser-control.ts");
+const { WebBrowserBroker, validBrowserPages } = await import(
+  "../../web/host/browser-control.ts"
+);
 after(() => rmSync(directory, { force: true, recursive: true }));
 afterEach(() =>
   writeFileSync(
@@ -49,11 +50,6 @@ const configure = (browser: Record<string, unknown>) =>
     join(directory, "my-pi-setup.json"),
     JSON.stringify({ browser: { control: true, ...browser } }),
   );
-const identity = (
-  browser: "chrome" | "edge" = "chrome",
-  profileId = "795239cc-8ff9-49cb-9894-e16b3ba86afa",
-) => ({ browser, profileId, extensionId: "a".repeat(32), version: "0.3.0" });
-
 test("Host browser control follows an exact native continuation, never an unrelated run or another Session", async (t) => {
   const { SessionManager } = await import("@earendil-works/pi-coding-agent");
   const { WebHost } = await import("../../web/host/web-host.ts");
@@ -103,6 +99,7 @@ test("Host browser control follows an exact native continuation, never an unrela
   const headers = {
     Authorization: `Bearer ${token}`,
     "Content-Type": "application/json",
+    "X-OpenPI-Web-Controller": owner.controllerId,
   };
   const response = await fetch(`${host.origin}/api/prompt`, {
     method: "POST",
@@ -116,7 +113,14 @@ test("Host browser control follows an exact native continuation, never an unrela
     }),
   });
   assert.equal(response.status, 202);
-  const discover = () => controlWebBrowser(manager, { operation: "browsers" });
+  const connected = await fetch(`${host.origin}/api/browser/control`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ sessionId, sessionPath, pages: [page] }),
+  });
+  assert.equal(connected.status, 200);
+  const discover = () =>
+    controlWebBrowser(manager, { tool: "find_roots", params: {} });
   assert.ok((await discover()).details);
   active = { sessionId, commandId: "native-continuation", epoch: 2 };
   await assert.rejects(discover(), /no originating Web tab/u);
@@ -137,297 +141,6 @@ test("Host browser control follows an exact native continuation, never an unrela
   configure({ control: true });
   active = undefined;
   await assert.rejects(discover(), /no originating Web tab/u);
-});
-
-test("portable browser identities bind credentials to the exact extension origin", () => {
-  for (const browser of ["safari", "firefox"] as const) {
-    const origin = `${browser === "safari" ? "safari-web-extension" : "moz-extension"}://795239cc-8ff9-49cb-9894-e16b3ba86afa`;
-    const data = {
-      ...identity(),
-      browser,
-      extensionId:
-        browser === "firefox"
-          ? "openpi-browser@openpi.dev"
-          : "795239cc-8ff9-49cb-9894-e16b3ba86afa",
-      extensionOrigin: origin,
-    };
-    assert.equal(validBrowserIdentity(data), true);
-    if (browser === "safari")
-      assert.equal(
-        validBrowserIdentity({
-          ...data,
-          extensionId: "com.apple.Safari.UnpackedExtensions.ABCDEF (UNSIGNED)",
-        }),
-        true,
-      );
-    assert.equal(
-      validBrowserIdentity({ ...data, extensionOrigin: "https://example.com" }),
-      false,
-    );
-    assert.equal(
-      validBrowserIdentity({ ...data, extensionOrigin: undefined }),
-      false,
-    );
-    const broker = new WebBrowserBroker(() => owner);
-    const connection = broker.connect(owner.controllerId, data);
-    assert.equal(
-      broker.authenticate(
-        connection.connectionId,
-        `Bearer ${connection.token}`,
-        origin,
-      ),
-      true,
-    );
-    assert.equal(
-      broker.authenticate(
-        connection.connectionId,
-        `Bearer ${connection.token}`,
-        `${origin}-other`,
-      ),
-      false,
-    );
-    assert.equal(broker.allowsOrigin(connection.connectionId, "null"), false);
-    broker.dispose();
-  }
-});
-
-test("default, explicit browser and an existing root preserve the user's exact browser selection", async () => {
-  configure({
-    defaultBrowser: "chrome",
-    externalBrowsers: ["chrome", "edge", "brave"],
-  });
-  const broker = new WebBrowserBroker(() => owner);
-  broker.poll(owner.sessionId, owner.controllerId, [page]);
-  const chrome = broker.connect(owner.controllerId, identity());
-  const edge = broker.connect("edge-controller", identity("edge"));
-  const chromePage = {
-    ...page,
-    id: `${chrome.connectionId}/11`,
-    title: "Chrome",
-  };
-  const edgePage = { ...page, id: `${edge.connectionId}/22`, title: "Edge" };
-  broker.pollNative(chrome.connectionId, [chromePage]);
-  broker.pollNative(edge.connectionId, [edgePage]);
-  assert.match(
-    JSON.stringify((await broker.execute({ operation: "tabs" })).details),
-    /Chrome/,
-  );
-  assert.match(
-    JSON.stringify(
-      (await broker.execute({ operation: "tabs", browser: "" })).details,
-    ),
-    /Chrome/,
-  );
-  assert.match(
-    JSON.stringify(
-      (await broker.execute({ operation: "tabs", browser: "edge" })).details,
-    ),
-    /Edge/,
-  );
-  assert.match(
-    JSON.stringify(
-      (await broker.execute({ operation: "tabs", browser: "embedded" }))
-        .details,
-    ),
-    /frame-1/,
-  );
-  await assert.rejects(
-    broker.execute({ operation: "tabs", browser: "brave" }),
-    /not connected/,
-  );
-  await assert.rejects(
-    broker.execute({ operation: "tabs", browser: "chromium" }),
-    /not allowed/,
-  );
-  const reading = broker.execute({ operation: "observe", root: edgePage.id });
-  assert.equal(
-    broker.pollNative(chrome.connectionId, [chromePage]).pending,
-    null,
-  );
-  const pending = broker.pollNative(edge.connectionId, [edgePage]).pending!;
-  assert.equal(
-    broker.resultNative(chrome.connectionId, pending.requestId, observed),
-    false,
-  );
-  assert.equal(
-    broker.resultNative(edge.connectionId, pending.requestId, observed),
-    true,
-  );
-  assert.equal(
-    (await reading).details &&
-      (await broker.execute({ operation: "browsers" })).content[0]?.type,
-    "text",
-  );
-  await assert.rejects(
-    broker.execute({
-      operation: "observe",
-      root: edgePage.id,
-      browser: "chrome",
-    }),
-    /exact connected/,
-  );
-  broker.dispose();
-});
-
-test("multiple native profiles require an explicit connection ID and never silently choose a browser", async () => {
-  configure({ externalBrowsers: ["chrome"] });
-  const broker = new WebBrowserBroker(() => owner);
-  const first = broker.connect("first", identity());
-  const second = broker.connect("second", identity("chrome", page.document));
-  broker.pollNative(first.connectionId, [
-    { ...page, id: `${first.connectionId}/1` },
-  ]);
-  broker.pollNative(second.connectionId, [
-    { ...page, id: `${second.connectionId}/1` },
-  ]);
-  await assert.rejects(
-    broker.execute({ operation: "tabs", browser: "chrome" }),
-    /Multiple chrome profiles/,
-  );
-  const selected = await broker.execute({
-    operation: "tabs",
-    browser: second.connectionId,
-  });
-  assert.match(
-    JSON.stringify(selected.details),
-    new RegExp(second.connectionId),
-  );
-  assert.doesNotMatch(
-    JSON.stringify(selected.details),
-    new RegExp(first.connectionId),
-  );
-  broker.dispose();
-});
-
-test("native credentials are scoped by connection and extension origin, and reconnect revokes them", () => {
-  const broker = new WebBrowserBroker(() => owner);
-  const connection = broker.connect(owner.controllerId, identity());
-  const auth = `Bearer ${connection.token}`;
-  assert.equal(
-    broker.authenticate(
-      connection.connectionId,
-      auth,
-      `chrome-extension://${identity().extensionId}`,
-    ),
-    true,
-  );
-  assert.equal(
-    broker.authenticate(
-      connection.connectionId,
-      auth,
-      "https://foreign.example",
-    ),
-    false,
-  );
-  assert.equal(
-    broker.authenticate(
-      connection.connectionId,
-      `Bearer ${"b".repeat(64)}`,
-      undefined,
-    ),
-    false,
-  );
-  assert.equal(broker.authenticate("other", auth, undefined), false);
-  broker.connect(owner.controllerId, identity());
-  assert.equal(
-    broker.authenticate(connection.connectionId, auth, undefined),
-    false,
-  );
-  broker.dispose();
-});
-
-test("revoking one browser cancels its in-flight work and consumes old observations without disabling discovery", async () => {
-  configure({ externalBrowsers: ["chrome"] });
-  const broker = new WebBrowserBroker(() => owner);
-  const chrome = broker.connect(owner.controllerId, identity());
-  const nativePage = { ...page, id: `${chrome.connectionId}/1` };
-  broker.pollNative(chrome.connectionId, [nativePage]);
-  const reading = broker.execute({ operation: "observe", root: nativePage.id });
-  const first = broker.pollNative(chrome.connectionId, [nativePage]).pending!;
-  broker.resultNative(chrome.connectionId, first.requestId, observed);
-  const stateId = ((await reading).details as { stateId: string }).stateId;
-  const writing = broker.execute({
-    operation: "act",
-    root: nativePage.id,
-    stateId,
-    actions: [{ action: "press", ref: "@e1" }],
-  });
-  const pending = broker.pollNative(chrome.connectionId, [nativePage]).pending!;
-  configure({ externalBrowsers: [] });
-  broker.reconcile();
-  await assert.rejects(writing, /access was revoked/);
-  assert.equal(
-    broker.resultNative(chrome.connectionId, pending.requestId, observed),
-    false,
-  );
-  assert.deepEqual(broker.pollNative(chrome.connectionId, [nativePage]), {
-    enabled: false,
-    pending: null,
-  });
-  assert.equal(broker.profiles()[0]?.connected, true);
-  configure({ externalBrowsers: ["chrome"] });
-  broker.pollNative(chrome.connectionId, [nativePage]);
-  await assert.rejects(
-    broker.execute({
-      operation: "act",
-      root: nativePage.id,
-      stateId,
-      actions: [{ action: "press", ref: "@e1" }],
-    }),
-    /state is stale/,
-  );
-  broker.dispose();
-});
-
-test("native open acknowledges only a newly advertised document in its exact transport", async () => {
-  configure({ defaultBrowser: "chrome", externalBrowsers: ["chrome"] });
-  const broker = new WebBrowserBroker(() => owner);
-  const connection = broker.connect(owner.controllerId, identity());
-  broker.pollNative(connection.connectionId, []);
-  const opening = broker.execute({ operation: "open", url: page.url });
-  const pending = broker.pollNative(connection.connectionId, []).pending!;
-  const added = { ...page, id: `${connection.connectionId}/10` };
-  broker.pollNative(connection.connectionId, [added]);
-  broker.resultNative(connection.connectionId, pending.requestId, {
-    root: added.id,
-  });
-  assert.deepEqual((await opening).details, { root: added.id });
-  broker.dispose();
-});
-
-test("invalid persisted permissions fail closed instead of selecting a different browser", async () => {
-  const broker = new WebBrowserBroker(() => owner);
-  for (const value of [
-    { defaultBrowser: "unknown-browser" },
-    { embedded: "true" },
-    { externalBrowsers: ["chrome", "chrome"] },
-  ]) {
-    configure(value);
-    await assert.rejects(
-      broker.execute({ operation: "browsers" }),
-      /Browser control is off/u,
-    );
-  }
-  broker.dispose();
-});
-
-test("disconnection and expired native heartbeat credentials revoke pending and future authority", async (t) => {
-  configure({ externalBrowsers: ["chrome"] });
-  t.mock.timers.enable({ apis: ["Date"] });
-  const broker = new WebBrowserBroker(() => owner);
-  const connection = broker.connect(owner.controllerId, identity());
-  const auth = `Bearer ${connection.token}`;
-  assert.equal(
-    broker.authenticate(connection.connectionId, auth, undefined),
-    true,
-  );
-  t.mock.timers.tick(15_001);
-  assert.equal(
-    broker.authenticate(connection.connectionId, auth, undefined),
-    false,
-  );
-  assert.equal(broker.profiles().length, 0);
-  broker.dispose();
 });
 
 test("embedded page advertisements are bounded and reject credentials and duplicate identities", () => {
@@ -506,7 +219,7 @@ test("a dispatched write consumes its state even when its result is uncertain", 
       operation: "act",
       root: page.id,
       stateId,
-      actions: [{ action: "typeText", text: "must not write" }],
+      actions: [{ action: "setText", text: "must not write" }],
     }),
     /require an observed ref/,
   );

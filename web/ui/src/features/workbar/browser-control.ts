@@ -2,9 +2,12 @@ import { useEffect, useRef } from "react";
 import type { BrowserRequest } from "../../../../../extensions/browser/web-bridge.ts";
 import { WebClient } from "../../protocol/client.ts";
 import { browserAddress } from "./browser-address.ts";
+import { BROWSER_BRIDGE_VERSION } from "../../../../protocol/browser.ts";
 
 function connectedPages() {
-  return document.documentElement.dataset.openpiBrowserExtension === "ready"
+  return document.documentElement.dataset.openpiBrowserExtension === "ready" &&
+    document.documentElement.dataset.openpiBrowserBridgeVersion ===
+      BROWSER_BRIDGE_VERSION
     ? [
         ...document.querySelectorAll<HTMLIFrameElement>(
           "iframe[data-openpi-browser-document]",
@@ -74,7 +77,10 @@ export function useBrowserControl(
         event.origin === location.origin &&
         message?.source === "openpi-browser-extension"
       ) {
-        if (message.type === "connector-hello")
+        if (
+          message.type === "connector-hello" &&
+          message.version === BROWSER_BRIDGE_VERSION
+        )
           connectorSeen.current = Date.now();
         else if (message.type === "control-result")
           reply(message.requestId, message.result, message.error);
@@ -145,7 +151,9 @@ export function useBrowserControl(
       // Ordinary iframe browsing without the optional extension needs no API polling.
       if (
         Date.now() - connectorSeen.current > 15_000 &&
-        document.documentElement.dataset.openpiBrowserExtension !== "ready"
+        (document.documentElement.dataset.openpiBrowserExtension !== "ready" ||
+          document.documentElement.dataset.openpiBrowserBridgeVersion !==
+            BROWSER_BRIDGE_VERSION)
       ) {
         cancel();
         if (!abort.signal.aborted) timer = setTimeout(() => void poll(), 1000);
@@ -200,6 +208,7 @@ export function useBrowserControl(
       if (!abort.signal.aborted) timer = setTimeout(() => void poll(), 250);
     };
     window.addEventListener("message", receive);
+    post({ type: "connector-probe" });
     void poll();
     return () => {
       clearTimeout(timer);

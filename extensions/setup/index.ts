@@ -8,6 +8,11 @@ import { Text } from "@earendil-works/pi-tui";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { configureWebAccessPackage } from "./web-access-package.ts";
+import { configureComputerUsePackage } from "./computer-use-package.ts";
+import {
+  COMPUTER_USE_ACTIONS,
+  COMPUTER_USE_PACKAGE,
+} from "../shared/computer-use.ts";
 import {
   sameWebSearchConnection,
   webSearchConnection,
@@ -205,7 +210,7 @@ export function buildInteractiveSetupPrompt(options: {
     "Natural-language configuration examples the user might ask for:",
     '- "use dark theme in OpenPI Web" → ui_web_theme=dark',
     '- "allow the model to use the embedded browser" → browser_control=true (off by default; Browser Bridge debugger permission is reviewed in Chrome/Edge)',
-    '- "allow Chrome and use it by default" → browser_control=true, browser_external=["chrome"], browser_default="chrome"; preserve other existing grants unless the user asks to revoke them. Installation and connection remain native browser steps in Settings → Browser.',
+    '- "use the original computer-use plugin" → computer_use_action="install" alone, with native package review; explicit reload or a new Session applies it. Embedded control additionally needs browser_control=true, browser_embedded=true, browser_default="embedded" and Browser Bridge. Any external browser_default delegates to the original desktop/browser plugin; browser_external is a preserved legacy setting, not a desktop permission.',
     '- "set OpenPI Web chat width to 960px" → ui_web_chat_width=960',
     `- Web sidebar width defaults to ${DEFAULT_WEB_SIDEBAR_WIDTH}px (${MIN_WEB_SIDEBAR_WIDTH}-${MAX_WEB_SIDEBAR_WIDTH}); tool pane width defaults to ${DEFAULT_WEB_AUXILIARY_WIDTH}px (${MIN_WEB_AUXILIARY_WIDTH}-${MAX_WEB_AUXILIARY_WIDTH}). Existing saved widths are preserved. Dragging a pane saves the same canonical preferences; small viewports temporarily clamp the visible width.`,
     '- "use a 320px sidebar and 600px tool pane" → ui_web_sidebar_width=320, ui_web_auxiliary_width=600',
@@ -573,6 +578,12 @@ export default function openPiSetup(pi: ExtensionAPI) {
             "Reviewed optional pi-web-access package operation. install-exa selects keyless Exa with a minimal new profile; install-existing preserves existing plugin preferences; disable disables its native Pi resources. Native confirmation is required. Use this field alone. Never reload the Session automatically.",
         }),
       ),
+      computer_use_action: Type.Optional(
+        StringEnum(COMPUTER_USE_ACTIONS, {
+          description:
+            "Install or disable the reviewed original pi-computer-use 0.5.1 package in this Pi profile. Requires native confirmation of desktop/browser/file input authority. Preserve existing plugin preferences. Use this field alone; never reload automatically. Embedded mode reuses its original schemas through Browser Bridge; native mode runs the unmodified plugin.",
+        }),
+      ),
       suggestions_enabled: Type.Optional(
         Type.Boolean({
           description:
@@ -652,7 +663,7 @@ export default function openPiSetup(pi: ExtensionAPI) {
       browser_control: Type.Optional(
         Type.Boolean({
           description:
-            "Allow model browser control. Off by default; requires Browser Bridge and a per-browser grant. Omit to preserve the current value.",
+            "Allow the original plugin to control embedded pages through Browser Bridge. Off by default. Native plugin permissions are owned by Pi and the OS. Omit to preserve the current value.",
         }),
       ),
       browser_embedded: Type.Optional(
@@ -674,7 +685,7 @@ export default function openPiSetup(pi: ExtensionAPI) {
           ],
           {
             description:
-              "Browser used when the user does not name one. Does not grant access. Defaults to embedded.",
+              "Select embedded adaptation (default) or the original native plugin for any external value. Native mode lets the model find the user's named application; it does not use the retired external Browser Bridge. Does not install or authorize the plugin.",
           },
         ),
       ),
@@ -691,7 +702,7 @@ export default function openPiSetup(pi: ExtensionAPI) {
           {
             uniqueItems: true,
             description:
-              "Explicitly allowed regular browsers. Empty by default. Replaces the existing grant list; requires installed, connected Browser Bridge.",
+              "Legacy external Browser Bridge grant list, retained for preference compatibility. It does not authorize or restrict the original native plugin. Preserve unless explicitly requested.",
           },
         ),
       ),
@@ -822,21 +833,30 @@ export default function openPiSetup(pi: ExtensionAPI) {
       ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (params.web_access_action !== undefined) {
+      if (
+        params.web_access_action !== undefined ||
+        params.computer_use_action !== undefined
+      ) {
+        const field =
+          params.web_access_action !== undefined
+            ? "web_access_action"
+            : "computer_use_action";
         if (
           Object.entries(params).some(
-            ([key, value]) =>
-              key !== "web_access_action" && value !== undefined,
+            ([key, value]) => key !== field && value !== undefined,
           )
         )
           throw new Error(
-            "Use web_access_action alone; optional package setup does not change OpenPI preferences.",
+            `Use ${field} alone; optional package setup does not change OpenPI preferences.`,
           );
-        const text = await configureWebAccessPackage({
-          action: params.web_access_action,
+        const reviewId =
+          field === "web_access_action"
+            ? "web_access_review"
+            : "computer_use_review";
+        const common = {
           cwd: ctx.cwd,
           agentDir: getAgentDir(),
-          confirm: async (title, detail) => {
+          confirm: async (title: string, detail: string) => {
             if (ctx.hasUI) return ctx.ui.confirm(title, detail);
             // Web uses the same Session-owned, controller-bound review as ask_user.
             const pending = askWebQuestions(
@@ -844,8 +864,9 @@ export default function openPiSetup(pi: ExtensionAPI) {
               _toolCallId,
               [
                 {
-                  id: "web_access_review",
-                  header: "联网搜索",
+                  id: reviewId,
+                  header:
+                    field === "web_access_action" ? "联网搜索" : "电脑操作",
                   question: `${title}\n\n${detail}`,
                   options: [
                     {
@@ -863,7 +884,7 @@ export default function openPiSetup(pi: ExtensionAPI) {
             );
             if (!pending)
               throw new Error(
-                "Optional web search setup requires Pi's native confirmation UI.",
+                "Optional package setup requires Pi's native confirmation UI.",
               );
             const result = await pending;
             const answer =
@@ -871,17 +892,29 @@ export default function openPiSetup(pi: ExtensionAPI) {
             return (
               result.kind === "answered" &&
               result.answers.length === 1 &&
-              answer?.id === "web_access_review" &&
+              answer?.id === reviewId &&
               answer.selected === "确认应用" &&
               !answer.note
             );
           },
           signal: _signal,
-        });
+        };
+        const text =
+          params.web_access_action !== undefined
+            ? await configureWebAccessPackage({
+                ...common,
+                action: params.web_access_action,
+              })
+            : await configureComputerUsePackage({
+                ...common,
+                action: params.computer_use_action!,
+              });
         return {
           content: [{ type: "text", text }],
           details: {
-            webAccess: params.web_access_action,
+            ...(params.web_access_action !== undefined
+              ? { webAccess: params.web_access_action }
+              : { computerUse: params.computer_use_action }),
             requiresReload: true,
           },
         };
@@ -1131,7 +1164,7 @@ export default function openPiSetup(pi: ExtensionAPI) {
           "Configure the installed OpenPI package according to this request:",
           request,
           "",
-          `Pi Skill and package requests use Pi's existing resource configuration and ordinary tools. Inspect native ownership and project trust, review a fixed package identity and installation permissions with the user through ask_user, preserve existing preferences and resource filters, and never reload this Session automatically. The one reviewed optional integration is ${WEB_ACCESS_PACKAGE.source}: use configure_my_pi_setup with web_access_action alone (install-exa when the user chooses Exa for a new profile; install-existing when the user chooses their existing preferences; disable for native user resource disabling). It enforces native confirmation and fixed package identity. Other resource-only requests must not call the OpenPI writer or change unrelated OpenPI settings. Report native persistence separately from active Session loading.`,
+          `Pi Skill and package requests use Pi's existing resource configuration and ordinary tools. Inspect native ownership and project trust, review a fixed package identity and installation permissions with the user through ask_user, preserve existing preferences and resource filters, and never reload this Session automatically. Reviewed optional integrations are ${WEB_ACCESS_PACKAGE.source} (web_access_action alone: install-exa, install-existing or disable) and ${COMPUTER_USE_PACKAGE.source} (computer_use_action alone: install or disable). Both enforce native confirmation and fixed package identity. Embedded browser control additionally uses the separate browser_control/browser_embedded grants and Browser Bridge; external mode executes the original computer-use package. Other resource-only requests must not call the OpenPI writer or change unrelated OpenPI settings. Report native persistence separately from active Session loading.`,
           "Current configuration:",
           currentConfiguration,
           EXPLICIT_VALUE_GUIDANCE,

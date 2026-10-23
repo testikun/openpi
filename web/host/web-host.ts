@@ -1,9 +1,10 @@
 import { webRuntimeStartup } from "./runtime-info.ts";
 import { execFile } from "node:child_process";
 import { registerWebBrowserBridge } from "../../extensions/browser/web-bridge.ts";
-import { WebBrowserBroker, validBrowserPages, validBrowserIdentity } from "./browser-control.ts";
+import { WebBrowserBroker, validBrowserPages } from "./browser-control.ts";
+import { EmbeddedComputerUse } from "./computer-use.ts";
 import { isBrowserId, isBrowserList, isExternalBrowser } from "../../extensions/shared/browser-config.ts";
-import { installedBrowsers, browserSetupAction, browserExtensionPath, portableBrowserExtensionPath, BROWSER_EXTENSION_VERSION } from "./browser-setup.ts";
+import { browserSetupAction, browserExtensionPath, BROWSER_EXTENSION_VERSION } from "./browser-setup.ts";
 import {
   createHash,
   randomBytes,
@@ -353,6 +354,7 @@ export class WebHost {
   private stopPromise?: Promise<void>;
   private readonly questions: WebQuestionBroker;
   private readonly browser: WebBrowserBroker;
+  private readonly computerUse: EmbeddedComputerUse;
   private unregisterBrowser?: () => void;
   private questionSession?: object;
   private unregisterQuestions?: () => void;
@@ -370,6 +372,7 @@ export class WebHost {
     };
     this.questions = new WebQuestionBroker(turnOwner, () => this.publish("questions_changed"));
     this.browser = new WebBrowserBroker(turnOwner);
+    this.computerUse = new EmbeddedComputerUse((request, signal) => this.browser.execute(request, signal), turnOwner);
     this.artifacts = new ArtifactReader(() => this.runtime.workspaceSelected && !this.stopping ? { sessionId: this.runtime.sessionManager.getSessionId(), sessionPath: this.runtime.sessionManager.getSessionFile() ?? `current:${this.runtime.sessionManager.getSessionId()}`, cwd: this.runtime.cwd } : undefined);
     this.requestedPort = options.port ?? 0;
     this.token = options.token
@@ -525,7 +528,8 @@ export class WebHost {
     this.questions.cancel();
     if (scope) this.unregisterQuestions = registerWebQuestionBridge(scope,
       (toolCallId, questions, signal, handoff) => this.questions.request(toolCallId, questions, signal, handoff));
-    if (scope) this.unregisterBrowser = registerWebBrowserBridge(scope, (request, signal) => this.browser.execute(request, signal));
+    this.computerUse.clear();
+    if (scope) this.unregisterBrowser = registerWebBrowserBridge(scope, (request, signal) => this.computerUse.execute(request, signal));
     if (scope) this.unregisterCommandFeedback = registerWebCommandFeedback(scope, (text, level) => {
       if (this.stopping || scope !== this.runtime.sessionManager) return;
       scope.appendCustomEntry(WEB_COMMAND_FEEDBACK, { text: text.slice(0, 12_000), level, truncated: text.length > 12_000 });
@@ -661,28 +665,9 @@ export class WebHost {
   private async handle(request: IncomingMessage, response: ServerResponse) {
     const url = new URL(request.url ?? "/", `http://${HOST}`);
     const expectedHost = `${HOST}:${this.port}`;
-    // Native extension transport has a separate credential and origin scope. It never grants Web API access.
+    // The retired external bridge never acquires authority in the new runtime.
     if (url.pathname === "/api/browser/native" && request.headers.host === expectedHost) {
-      const connectionId = url.searchParams.get("connectionId") ?? "";
-      const origin = request.headers.origin;
-      if (request.method === "OPTIONS" && this.browser.allowsOrigin(connectionId, origin)) {
-        response.writeHead(204, { "Access-Control-Allow-Origin": origin!, "Access-Control-Allow-Methods": "POST", "Access-Control-Allow-Headers": "authorization, content-type", "Vary": "Origin", "Cache-Control": "no-store" });
-        return response.end();
-      }
-      if (!this.browser.authenticate(connectionId, request.headers.authorization, origin)) return this.json(response, 401, { error: "Invalid browser connection credential" });
-      if (origin) response.setHeader("Access-Control-Allow-Origin", origin);
-      if (request.method !== "POST") return this.json(response, 405, { error: "Browser transport requires POST" });
-      const body = await this.readJson(request, 4_300_000);
-      if (body.closed === true) { this.browser.disconnect(connectionId); return this.json(response, 200, { closed: true }); }
-      if (!validBrowserPages(body.pages, 64) || body.pages.some((page) => !page.id.startsWith(`${connectionId}/`)) ||
-        (body.requestId !== undefined && !isWebControllerId(body.requestId)) ||
-        (body.error !== undefined && typeof body.error !== "string")) return this.json(response, 400, { error: "Invalid browser transport message" });
-      const state = this.browser.pollNative(connectionId, body.pages);
-      if (typeof body.requestId === "string") {
-        const accepted = this.browser.resultNative(connectionId, body.requestId, body.result, body.error as string | undefined);
-        return this.json(response, accepted ? 200 : 409, { accepted, enabled: state.enabled });
-      }
-      return this.json(response, 200, state);
+      return this.json(response, 410, { error: "External browser control uses the original pi-computer-use package. Update Browser Bridge for embedded pages." });
     }
     if (
       request.headers.host !== expectedHost ||
@@ -777,13 +762,9 @@ export class WebHost {
       return this.json(response, 202, { accepted: true });
     }
     if (url.pathname === "/api/browser/connections" && request.method === "POST") {
-      const body = await this.readJson(request);
-      const controller = request.headers["x-openpi-web-controller"];
-      if (!isWebControllerId(controller) || !validBrowserIdentity(body)) return this.json(response, 400, { error: "Invalid browser identity" });
-      return this.json(response, 200, this.browser.connect(controller, body));
+      return this.json(response, 410, { error: "External browser pairing was retired. Use the original Pi package." });
     }
     if (url.pathname === "/api/settings/browser") {
-      const controller = request.headers["x-openpi-web-controller"];
       if (request.method === "POST") {
         const body = await this.readJson(request);
         const { control, embedded, defaultBrowser, externalBrowsers } = body;
@@ -792,12 +773,12 @@ export class WebHost {
           (defaultBrowser !== undefined && !isBrowserId(defaultBrowser)) || (externalBrowsers !== undefined && !isBrowserList(externalBrowsers))) return this.json(response, 400, { error: "Invalid browser preferences" });
         return this.json(response, 403, { error: "Browser permissions and default selection require /openpi-setup." });
       } else if (request.method !== "GET") return this.json(response, 405, { error: "Use GET or POST" });
-      return this.json(response, 200, { config: loadSetupConfig().browser, profiles: this.browser.profiles(typeof controller === "string" ? controller : undefined), browsers: await installedBrowsers(), extensionPath: browserExtensionPath, portableExtensionPath: portableBrowserExtensionPath, extensionVersion: BROWSER_EXTENSION_VERSION });
+      return this.json(response, 200, { config: loadSetupConfig().browser, extensionPath: browserExtensionPath, extensionVersion: BROWSER_EXTENSION_VERSION, computerUse: this.runtime.getComputerUseStatus?.() ?? { loaded: false } });
     }
     if (url.pathname === "/api/settings/browser/action" && request.method === "POST") {
       const body = await this.readJson(request);
-      if (!isExternalBrowser(body.browser) || !["folder", "manage", "connect"].includes(String(body.action)) || Object.keys(body).some((key) => !["browser", "action"].includes(key))) return this.json(response, 400, { error: "Invalid browser setup action" });
-      try { return this.json(response, 200, await browserSetupAction(body.browser, body.action as "folder" | "manage" | "connect", this.origin)); }
+      if (!isExternalBrowser(body.browser) || !["folder", "manage"].includes(String(body.action)) || Object.keys(body).some((key) => !["browser", "action"].includes(key))) return this.json(response, 400, { error: "Invalid browser setup action" });
+      try { return this.json(response, 200, await browserSetupAction(body.browser, body.action as "folder" | "manage")); }
       catch { return this.json(response, 422, { error: "Could not open that browser. Open it yourself, then follow the setup steps." }); }
     }
     if (url.pathname === "/api/browser/control" && request.method === "POST") {

@@ -1,22 +1,21 @@
 {
   "manifest_version": 3,
   "name": "OpenPI Browser Bridge",
-  "version": "0.4.0",
-  "description": "Connect authorized browser pages to OpenPI, with embedded navigation and browser control.",
+  "version": "0.5.0",
+  "description": "Connect OpenPI's embedded pages to the original pi-computer-use tools.",
   "minimum_chrome_version": "145",
   "permissions": [
     "declarativeNetRequestWithHostAccess",
     "webNavigation",
     "scripting",
-    "debugger",
-    "storage"
+    "debugger"
   ],
   "host_permissions": ["http://*/*", "https://*/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "content_scripts": [
     {
       "matches": ["http://127.0.0.1/*", "http://localhost/*"],
-      "js": ["workbench.js", "connector.js"],
+      "js": ["workbench.js"],
       "run_at": "document_idle"
     },
     {

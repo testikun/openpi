@@ -78,7 +78,7 @@ OpenPI 自有偏好通过自然语言配置：
 
 普通编码任务继续走 Pi 原生路径：`read`、`bash`、`edit`、`write`，完整历史、Session compaction、工具输出边界、显式 Bash timeout 与 Provider loop。在 `pi -p`/`--mode json` 运行和 Subagent/Workflow 子会话中——没有人可以中断挂起的命令——未带 `timeout` 的 Bash 调用使用 120 秒默认上限；交互会话（终端与 Web 工作台）沿用 Pi 行为，无默认超时。与 Pi 一样，OpenPI 不添加删除保护：Bash 中的 `rm` 完全沿用 Pi 自身行为。长期进程（dev server、watcher、长测试）直接使用 Pi 的 Bash 后台运行，例如 `nohup npm run dev &`。
 
-每个 Session 获得一套固定的常驻工具集——Subagent 5 个（`subagent_spawn`、`subagent_wait`、`subagent_cancel`、`subagent_send`、`subagent_check`）与 Workflow 3 个（`workflow`、`workflow_stop`、`workflow_status`）——在 Session 开始时确定一次，之后不因 Prompt 关键词或运行时状态变化而改变，模型可见的工具面因此稳定且对缓存友好。只有明确的用户边界会临时增减工具：进入 `/plan` 加入只读 Git、`plan_ready` 与 `ask_user`/`human_handoff`；`/openpi-setup` 进行期间加入 `configure_my_pi_setup` 与 `ask_user`/`human_handoff`；浏览器控制经授权后启用 `openpi_browser`。
+每个 Session 获得一套固定的常驻工具集——Subagent 5 个（`subagent_spawn`、`subagent_wait`、`subagent_cancel`、`subagent_send`、`subagent_check`）与 Workflow 3 个（`workflow`、`workflow_stop`、`workflow_status`）——在 Session 开始时确定一次，之后不因 Prompt 关键词或运行时状态变化而改变。明确的用户边界会临时增减工具：进入 `/plan` 加入只读 Git、`plan_ready` 与 `ask_user`/`human_handoff`；`/openpi-setup` 进行期间加入 `configure_my_pi_setup` 与 `ask_user`/`human_handoff`。可选 Computer Use 由原版 Pi 插件提供 11 个工具；内置页面与原生执行共用同一套参数 Schema。
 
 默认安装是安静的：不改主题、不绑定 Provider 或模型、不开启下一步预测，也不执行 post-edit 命令。Code Mode（`codemode`）默认关闭，可通过 `/openpi-setup` 开启。
 
@@ -276,7 +276,7 @@ Web「设置 → 常规」保存跟进默认方式 `ui.webFollowUpBehavior`。�
 - npm 安装：`pi install npm:@tt-a1i/openpi`；
 - GitHub 安装：`pi install git:github.com/openpi-dev/openpi`。
 
-浏览器控制使用可选的 [OpenPI Browser Bridge](web/browser-extension/README.md) 0.4.0，需浏览器原生安装及权限确认。
+Computer Use 使用可选原版 Pi 包 `npm:@injaneity/pi-computer-use@0.5.1`。通过 `/openpi-setup` 审阅 `computer_use_action=install` 或 `disable`，保留已有偏好；明确重新加载或新建会话后才改变工具加载。`browser_default=embedded`（默认）把原版工具绑定到发起请求的 OpenPI 标签，需要 `browser_control=true`、`browser_embedded=true` 及 Chromium 中的 [Browser Bridge](web/browser-extension/README.md) 0.5.0。外部 `browser_default` 直接执行原版桌面／浏览器插件，由 Pi 与系统权限管理。`browser_external=[]` 仅为旧偏好保留，不是原版插件的权限边界。不再注册第二套浏览器工具或配对外部浏览器配置；内置控制默认关闭。
 
 ## FAQ
 

@@ -19,289 +19,183 @@ beforeEach(async () => {
 });
 afterEach(() => {
   cleanup();
+  delete document.documentElement.dataset.openpiBrowserBridgeVersion;
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
-const initial = (): BrowserSettingsStatus => ({
-  config: {
-    control: false,
-    embedded: true,
-    defaultBrowser: "embedded",
-    externalBrowsers: [],
-  },
-  profiles: [],
-  browsers: [
-    { id: "chrome", installed: true },
-    { id: "edge", installed: false },
-    { id: "brave", installed: false },
-    { id: "chromium", installed: false },
-  ],
-  extensionPath: "/bundled/browser-extension",
-  extensionVersion: "0.3.0",
-});
-function backend(state = initial()) {
-  const writes: { path: string; body: Record<string, unknown> }[] = [];
+function backend(
+  options: {
+    native?: boolean;
+    loaded?: boolean;
+    failSetup?: boolean;
+    failActions?: boolean;
+  } = {},
+) {
+  const writes: { path: string; body: unknown }[] = [];
   const requests: string[] = [];
-  const server = {
-    writes,
-    requests,
-    state,
-    failActions: false,
-    failSetup: false,
+  const state: BrowserSettingsStatus = {
+    config: {
+      control: false,
+      embedded: true,
+      defaultBrowser: options.native ? "chrome" : "embedded",
+      externalBrowsers: [],
+    },
+    extensionPath: "/bundled/browser-extension",
+    extensionVersion: "0.5.0",
+    computerUse: {
+      loaded: Boolean(options.loaded),
+      ...(options.loaded ? { version: "0.5.1" } : {}),
+    },
   };
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: string, init?: RequestInit) => {
+    vi.fn(async (path: string, init?: RequestInit) => {
       if (init?.method === "POST") {
-        const body = JSON.parse(String(init.body));
-        writes.push({ path: input, body });
-        if (input === "/api/settings/browser/action" && server.failActions)
+        writes.push({ path, body: JSON.parse(String(init.body)) });
+        if (options.failActions)
           return new Response(
             JSON.stringify({ error: "Could not open browser" }),
             { status: 422 },
           );
-        if (input === "/api/settings/browser")
-          state.config = { ...state.config, ...body };
       }
       return new Response(JSON.stringify(state));
     }),
   );
   render(
     createElement(BrowserSettingsPanel, {
-      onConfigure: vi.fn(async (request: string) => {
+      onConfigure: async (request: string) => {
         requests.push(request);
-        return !server.failSetup;
-      }),
+        return !options.failSetup;
+      },
     }),
   );
-  return server;
+  return { state, writes, requests };
 }
 
-it("separates installation evidence from authorization and guides setup without a model request", async () => {
-  const { writes, requests, state } = backend();
-  await screen.findByRole("heading", { name: "Browser" });
-  expect(screen.queryByText("Connected")).toBeNull();
+it("reviews original package installation without claiming that it is already loaded", async () => {
+  const server = backend();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Install or enable plugin…" }),
+  );
+  await waitFor(() => expect(server.requests).toHaveLength(1));
+  expect(server.requests[0]).toContain("npm:@injaneity/pi-computer-use@0.5.1");
+  expect(server.requests[0]).toContain("do not reload automatically");
+  expect(server.writes).toEqual([]);
   expect(
-    (
-      screen.getByRole("switch", {
-        name: "Browser control",
-      }) as HTMLInputElement
-    ).checked,
-  ).toBe(false);
-  fireEvent.click(screen.getByRole("button", { name: "Set up Chrome" }));
-  const guide = screen.getByRole("region", { name: "Connect Chrome" });
+    screen.getByText("Original plugin not loaded in this Session"),
+  ).toBeTruthy();
+});
+
+it("saves embedded permission through setup and leaves the switch unchanged until persistence", async () => {
+  const server = backend();
+  const control = await screen.findByRole("switch", {
+    name: "Allow embedded page control",
+  });
+  fireEvent.click(control);
+  await waitFor(() => expect(server.requests).toHaveLength(1));
+  expect(server.requests[0]).toContain('"control":true');
+  expect(server.requests[0]).toContain('"embedded":true');
+  expect((control as HTMLInputElement).checked).toBe(false);
+  expect(server.writes).toEqual([]);
+});
+
+it("native mode uses the original plugin and exposes no external Browser Bridge pairing", async () => {
+  const server = backend({ native: true, loaded: true });
+  await screen.findByText(/Original plugin loaded in this Session/u);
+  expect(screen.getByText(/system mouse and keyboard/)).toBeTruthy();
+  expect(screen.queryByRole("switch")).toBeNull();
+  expect(screen.queryByText("OpenPI Browser Bridge")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Disable plugin…" }));
+  await waitFor(() =>
+    expect(server.requests[0]).toContain("computer_use_action=disable"),
+  );
+  expect(server.writes).toEqual([]);
+});
+
+it("choosing native mode requests setup without granting desktop permissions or mutating browser settings directly", async () => {
+  const server = backend();
+  fireEvent.change(
+    await screen.findByRole("combobox", { name: "Operate in" }),
+    { target: { value: "native" } },
+  );
+  await waitFor(() =>
+    expect(server.requests[0]).toContain('"defaultBrowser":"chrome"'),
+  );
+  expect(server.requests[0]).toContain(
+    "do not install or reload packages automatically",
+  );
+  expect(server.state.config.defaultBrowser).toBe("embedded");
+  expect(server.writes).toEqual([]);
+});
+
+it("the embedded extension guide opens only requested native helpers and never opens a new OpenPI tab to connect", async () => {
+  const server = backend();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Set up OpenPI browser" }),
+  );
+  const guide = screen.getByRole("region", { name: "Connect OpenPI browser" });
   fireEvent.click(
     within(guide).getByRole("button", { name: "Open Chrome extensions" }),
   );
   await waitFor(() =>
-    expect(writes).toEqual([
+    expect(server.writes).toEqual([
       {
         path: "/api/settings/browser/action",
         body: { browser: "chrome", action: "manage" },
       },
     ]),
   );
-  expect(screen.queryByText("Connected")).toBeNull();
-  expect(window.open).not.toHaveBeenCalled();
-  await within(guide).findByRole("heading", { name: "Turn on Developer mode" });
-  fireEvent.click(within(guide).getByRole("button", { name: "It’s on. Next" }));
-  expect(within(guide).getByText(state.extensionPath)).toBeTruthy();
   fireEvent.click(
-    within(guide).getByRole("button", { name: "Locate extension" }),
+    await within(guide).findByRole("button", { name: "It’s on. Next" }),
+  );
+  fireEvent.click(
+    await within(guide).findByRole("button", { name: "Locate extension" }),
   );
   await waitFor(() =>
-    expect(writes.at(-1)?.body).toEqual({
+    expect(server.writes.at(-1)?.body).toEqual({
       browser: "chrome",
       action: "folder",
     }),
   );
-  expect(
-    within(guide).getByText("Drag the folder onto Chrome extensions"),
-  ).toBeTruthy();
-  expect(
-    within(guide).getByText(
-      "Select this entire folder, not a .js file inside it.",
-    ),
-  ).toBeTruthy();
-  await waitFor(() =>
-    expect(
-      (
-        within(guide).getByRole("button", {
-          name: "Added. Connect to OpenPI",
-        }) as HTMLButtonElement
-      ).disabled,
-    ).toBe(false),
-  );
   fireEvent.click(
     within(guide).getByRole("button", { name: "Added. Connect to OpenPI" }),
   );
-  await within(guide).findByRole("heading", { name: "Connect to OpenPI" });
-  expect(writes.at(-1)?.body).toEqual({ browser: "chrome", action: "connect" });
   expect(
-    within(guide).queryByRole("button", { name: "Allow OpenPI to use it" }),
-  ).toBeNull();
-  expect(
-    writes.every((write) => write.path === "/api/settings/browser/action"),
-  ).toBe(true);
-  state.profiles = [
-    {
-      id: "connection",
-      browser: "chrome",
-      profileId: "profile",
-      extensionId: "extension",
-      version: "0.3.0",
-      connected: true,
-      current: true,
-    },
-  ];
-  fireEvent.focus(window);
-  fireEvent.click(
-    await within(guide).findByRole("button", {
-      name: "Allow OpenPI to use it",
-    }),
-  );
-  await waitFor(() =>
-    expect(requests).toEqual([
-      'Configure browser access: browser_control=true, browser_external=["chrome"]. Preserve all other settings.',
-    ]),
-  );
-  expect(state.config.control).toBe(false);
-  expect(state.config.externalBrowsers).toEqual([]);
-  expect(writes.some((write) => write.path === "/api/settings/browser")).toBe(
-    false,
-  );
-  expect(writes.some((write) => write.path.includes("prompt"))).toBe(false);
+    await within(guide).findByRole("button", { name: "Reload" }),
+  ).toBeTruthy();
+  expect(server.writes).toHaveLength(2);
+  expect(server.requests).toEqual([]);
 });
 
-it("keeps a failed native launch on the same step and permits retry", async () => {
-  const server = backend();
-  server.failActions = true;
-  fireEvent.click(await screen.findByRole("button", { name: "Set up Chrome" }));
-  const guide = screen.getByRole("region", { name: "Connect Chrome" });
+it("bridge readiness requires the current extension and does not imply plugin loading or permission", async () => {
+  document.documentElement.dataset.openpiBrowserBridgeVersion = "0.4.0";
+  backend();
+  await screen.findByText("Extension update needed");
+  document.documentElement.dataset.openpiBrowserBridgeVersion = "0.5.0";
+  await screen.findByText("Embedded bridge ready");
+  expect(
+    screen.getByText("Original plugin not loaded in this Session"),
+  ).toBeTruthy();
+  expect((screen.getByRole("switch") as HTMLInputElement).checked).toBe(false);
+});
+
+it("failed setup preserves configuration and blocked guide popups keep the inline guide usable", async () => {
+  const server = backend({ failSetup: true });
   fireEvent.click(
-    within(guide).getByRole("button", { name: "Open Chrome extensions" }),
+    await screen.findByRole("switch", { name: "Allow embedded page control" }),
   );
   await screen.findByRole("alert");
-  expect(
-    within(guide).getByRole("heading", { name: "Open Chrome extensions" }),
-  ).toBeTruthy();
-  expect(
-    within(guide).queryByRole("heading", { name: "Turn on Developer mode" }),
-  ).toBeNull();
-  server.failActions = false;
+  expect(server.state.config.control).toBe(false);
   fireEvent.click(
-    within(guide).getByRole("button", { name: "Open Chrome extensions" }),
-  );
-  await within(guide).findByRole("heading", { name: "Turn on Developer mode" });
-  expect(server.writes.every((write) => write.path.endsWith("/action"))).toBe(
-    true,
-  );
-});
-
-it("skips installation without claiming a stale or other-profile embedded connection", async () => {
-  const { state, writes } = backend();
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Set up OpenPI browser" }),
-  );
-  const guide = screen.getByRole("region", { name: "Connect OpenPI browser" });
-  fireEvent.click(
-    within(guide).getByRole("button", { name: "Already installed? Connect" }),
-  );
-  state.profiles = [
-    {
-      id: "connection",
-      browser: "chrome",
-      profileId: "profile",
-      extensionId: "extension",
-      version: "0.2.0",
-      connected: true,
-      current: true,
-    },
-  ];
-  fireEvent.click(
-    within(guide).getByRole("button", { name: "Check connection" }),
-  );
-  await screen.findByText(/No connection yet/);
-  expect(
-    within(guide).queryByRole("button", { name: "Allow OpenPI to use it" }),
-  ).toBeNull();
-  state.profiles[0].version = "0.3.0";
-  state.profiles[0].current = false;
-  fireEvent.focus(window);
-  await screen.findByRole("button", { name: "Manage Chrome" });
-  expect(
-    within(guide).queryByRole("button", { name: "Allow OpenPI to use it" }),
-  ).toBeNull();
-  expect(writes).toEqual([]);
-});
-
-it("requests grants and default selection through setup without optimistic authorization", async () => {
-  const { writes, requests, state } = backend();
-  await screen.findByRole("heading", { name: "Browser" });
-  fireEvent.click(screen.getByRole("switch", { name: "Allow Chrome" }));
-  await waitFor(() =>
-    expect(requests[0]).toBe(
-      'Configure browser access: browser_external=["chrome"]. Preserve all other settings.',
-    ),
-  );
-  expect(state.config.externalBrowsers).toEqual([]);
-  expect(
-    (screen.getByRole("switch", { name: "Allow Chrome" }) as HTMLInputElement)
-      .checked,
-  ).toBe(false);
-  state.config = { ...state.config, externalBrowsers: ["chrome"] };
-  fireEvent.focus(window);
-  await waitFor(() =>
-    expect(
-      (screen.getByRole("switch", { name: "Allow Chrome" }) as HTMLInputElement)
-        .checked,
-    ).toBe(true),
-  );
-  await waitFor(() =>
-    expect(
-      (
-        screen.getByRole("combobox", {
-          name: "Default browser",
-        }) as HTMLSelectElement
-      ).disabled,
-    ).toBe(false),
-  );
-  fireEvent.change(screen.getByRole("combobox", { name: "Default browser" }), {
-    target: { value: "chrome" },
-  });
-  await waitFor(() =>
-    expect(requests[1]).toBe(
-      'Configure browser access: browser_default="chrome". Preserve all other settings.',
-    ),
-  );
-  expect(state.config.defaultBrowser).toBe("embedded");
-  expect(writes).toEqual([]);
-  expect(
-    (
-      screen.getByRole("switch", {
-        name: "Browser control",
-      }) as HTMLInputElement
-    ).checked,
-  ).toBe(false);
-});
-
-it("only marks the initiating embedded browser connected, while named browsers use their own connection", async () => {
-  const state = initial();
-  state.profiles = [
-    {
-      id: "connection",
-      browser: "chrome",
-      profileId: "profile",
-      extensionId: "extension",
-      version: "0.3.0",
-      connected: true,
-      current: false,
-    },
-  ];
-  backend(state);
-  await screen.findByRole("button", { name: "Manage Chrome" });
-  expect(
     screen.getByRole("button", { name: "Set up OpenPI browser" }),
+  );
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: "Keep this guide in a separate window",
+    }),
+  );
+  expect(
+    screen.getByRole("region", { name: "Connect OpenPI browser" }),
   ).toBeTruthy();
-  expect(screen.getAllByText("Connected")).toHaveLength(1);
+  expect(server.writes).toEqual([]);
 });

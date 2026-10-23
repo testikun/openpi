@@ -1,51 +1,42 @@
 # OpenPI Browser Bridge
 
-可选的 WebExtension 扩展。Chrome、Edge、Brave、Chromium 145+ 支持 OpenPI 内置页面和普通标签；macOS Safari 26+、Firefox 128+ 使用 `web/browser-extension-portable/` 兼容构建控制普通标签。0.4.0 增加后两种浏览器及独立引导窗口，Chromium 继续适配 `pi-computer-use` 0.5.1 的 CDP 浏览器操作。无需修改 Pi 内核或上游 `pi-computer-use`，也不安装完整桌面控制包。网页由实际浏览器渲染，不启动替代浏览器服务或视频串流。
+0.5.0 仅负责 OpenPI 内置页面的导航、绑定与 CDP 执行。支持 Chrome、Edge、Brave 和 Chromium 145+。普通浏览器与桌面应用直接使用原版 `@injaneity/pi-computer-use`，不需要此扩展，也不再安装 portable 构建或配对外部浏览器配置。
 
-## 安装
+## 设置
 
-1. 在 OpenPI 的“设置 → 浏览器”中，选择内置浏览器或需要使用的普通浏览器，点击“设置”。
-2. 向导每次显示一步：打开扩展页 → 按示意开启开发者模式 → 添加 OpenPI Browser Bridge。扩展文件已随 OpenPI 提供，无需另行下载。在“加载已解压的扩展程序”的文件选择窗口中，可粘贴向导提供的目录路径（macOS 先按 `⌘ ⇧ G`），也可点击“打开文件夹”查看位置。审阅浏览器提示的权限。
-3. 点击“已添加，连接 OpenPI”，或在安装扩展的同一浏览器配置中刷新 OpenPI；已安装的用户可直接跳到连接步骤。本机地址需为 `http://127.0.0.1:端口/` 或 `http://localhost:端口/`。向导自动检测连接，只有版本匹配的真实心跳才会显示“已连接”；点击“下一步”不代表安装已验证。
-4. 选择是否允许 OpenPI 使用它、开启浏览器控制，并按需设为默认。安装或连接本身不会开启模型访问。
+1. 在「设置 → 浏览器」请求安装原版 `npm:@injaneity/pi-computer-use@0.5.1`，或通过 `/openpi-setup` 审阅 `computer_use_action=install`。Pi 原生确认会列出固定来源及桌面、浏览器、文件操作权限。已有插件偏好原样保留。
+2. 空闲时明确重新加载 Pi 资源，或新建会话。安装回执不代表当前会话已加载插件。
+3. 使用内置页面时，通过设置引导打开 Chromium 的扩展管理页，启用开发者模式，选择此 `browser-extension` 文件夹。浏览器原生安装和站点权限确认由浏览器负责。
+4. 刷新当前 OpenPI 页面，并通过 `/openpi-setup` 保存 `browser_control=true`、`browser_embedded=true`、`browser_default=embedded`。内置控制默认关闭；安装扩展与完成引导不会自动授权。
 
-引导在支持 Document Picture-in-Picture 的浏览器中可浮动显示，其他浏览器使用普通独立窗口；关闭窗口后恢复原来的步骤。圈选位置是示意图，不向浏览器内部管理页注入界面。引导窗口复用原工作台的控制器和状态，关闭设置或工作台时一并关闭。
+原版配置命令 `/computer-use` 保持只读展示。OpenPI 的配置入口仍为 `/openpi-setup`。选择普通模式（外部 `browser_default`）时，原版插件自行观察系统应用并执行操作，受 Pi 与系统权限约束；它可能激活窗口或使用真实键鼠。
 
-Safari 在「设置 → 高级」开启网页开发者功能，再到「开发者 → 添加临时扩展」选择兼容构建文件夹，按原生提示完成未签名扩展的本机授权、启用和网站许可。Firefox 打开 `about:debugging#/runtime/this-firefox`，点击「临时载入附加组件」，选择兼容文件夹的 `manifest.json`。两者重启后均需重新加载临时安装；正式永久安装需另行签名并发布扩展包。Safari 的设置动作只打开应用，菜单路径由引导明确说明。
+## 同一套工具
 
-更新文件后，在扩展管理页点击重新加载，再刷新 OpenPI。0.2.0 新增 `debugger` 权限，0.3.0 使用 `storage` 保存随机配置标识；新增权限需在浏览器中审阅并接受。禁用或移除扩展即可撤销增强；OpenPI 保留普通 iframe 浏览。扩展不由 npm 安装脚本自动安装，也不自行修改 Pi 配置。设置页的显式授权与 `/openpi-setup` 共用配置写入器；安装及站点权限由浏览器管理。
+模型只看到原版插件注册的 11 个工具及其原始参数 Schema：`find_roots`、`observe_ui`、`search_ui`、`expand_ui`、`inspect_ui`、`act_ui`、`read_text`、`wait_for`、`launch_browser`、`navigate_browser`、`evaluate_browser`。OpenPI 不再注册 `openpi_browser`。
 
-也可以通过 `/openpi-setup` 自然语言配置，例如“允许使用 Chrome，并把它设为默认浏览器”。同一 Pi Session 使用一个父 Session 专属的 `openpi_browser`：`browsers` 列出授权和连接，`tabs` 返回选定浏览器的页面 root，`open` 新增 HTTP(S) 页面并等待绑定；`observe` 读取指定 root 的文本和无障碍节点，`image=true` 返回实际截图；`act` 使用该观察的 `stateId` 和节点 ref，支持 `press`、`setText`、`typeText` 和 `scroll`。点击和输入需明确 ref。`navigate` 只确认导航已发送，随后重新观察验证加载结果。
+内置模式的 `find_roots` 返回当前发起标签的页面 root；`observe_ui` 返回不可变 `stateId` 和元素 ref。语义观察读取 AX 树，`visual` 加入实际 PNG 与截图像素坐标尺寸。搜索、展开和检查访问完整缓存；单次可见文本有预算，较长输出通过原版 `read_text` 和不可变 `@o` 引用继续读取。
 
-未指定 `browser` 时使用设置中的默认值；在对话中说“使用 Chrome”或“使用 Edge”，模型可明确选择对应浏览器。未授权、未连接或存在多个配置歧义时返回错误，不自动换浏览器；`browsers` 返回的 `profiles[].id` 可选择确切连接。默认浏览器改变后，已返回的 root 仍绑定原浏览器。内置页面跟随发起 Turn 的 OpenPI 标签；普通浏览器使用已连接配置中的现有标签页和登录状态，该配置中需保留一个 OpenPI 标签，标签置于后台时传输仍工作。内置最多 8 页，普通浏览器最多暴露 64 个可用 HTTP(S) 标签；达到上限时先关闭不用的页面。
+`act_ui` 支持原版点击、输入、按键、滚动、移动和拖拽参数。富文本使用浏览器编辑操作，避免替换整个编辑器文档。真实 `file_input` 节点会说明 `setText` 可接收一个绝对本地文件路径，空字符串清空选择；后台校验普通文件，Chrome 选择后再次核对文件名和字节数。输入框选择成功不等于服务器已收到文件，仍需观察页面回执或使用 `expect` 核实。
 
-## 行为
+`evaluate_browser` 的 JavaScript 只在绑定文档的隔离上下文执行。`navigate_browser` 返回导航派发回执，随后调用 `find_roots` / `observe_ui` 确认新文档。`launch_browser` 在工作栏打开 HTTP(S) 页面，不启动另一个浏览器；没有页面时也能通过扩展的只读存在信号接收首次打开请求。
 
-- 同步嵌入页面的实际地址、标题和可用的原生前进/后退状态；刷新当前页面。
-- 普通新窗口链接、中键/修饰键点击，以及用户点击触发的带 HTTP(S) 地址的 `window.open`，转为 OpenPI 内部标签页。最多 8 页；达到上限时保留可外部打开的链接。
-- 仅在已连接的本机 OpenPI 顶层标签页中，对外部子框架响应移除 `X-Frame-Options`。工作台自身来源例外，关闭浏览器工具、离开工作台或关闭顶层标签页后撤销规则。
-- 保留完整 `Content-Security-Policy`，包括 `frame-ancestors`、脚本和对象限制；不修改 Cookie、登录或其他响应头。
+## 权限与生命周期
 
-这不是完整浏览器引擎。CSP 禁止嵌入、第三方 Cookie、验证码和登录策略仍可能限制访问。跨来源历史受 Navigation API 可见范围限制，不能保证全部可后退。空白弹窗、非 HTTP(S) 地址、下载和依赖 `window.opener`/返回窗口对象的流程不适合转成 iframe；空白登录弹窗保留浏览器原行为。已转换的 `window.open` 返回 `null`。网站在脚本执行早期保存的原始 `window.open` 引用也可能绕过桥接。
+- Pi 拥有 Session、模型、包资源与工具定义；WebHost 的既有当前 Turn 和 controller 拥有内置输入权限。
+- 只绑定实际工作栏的直接 iframe，使用浏览器文档身份及 nonce 核对；不控制 OpenPI 自身、同级文档或另一个发起标签。
+- 任何写入先消费旧状态；取消、超时、页面替换与撤权均禁止凭旧状态重放。已派发但未验证的效果报告为不确定。无 `expect` 的事件派发不冒充业务成功。
+- 截图只裁切可见内置页面；坐标输入必须来自该截图并仍命中绑定 iframe，不得点击覆盖的工作台界面。
+- 关闭工作栏会清理绑定、DNR 规则及调试器。内置模式不初始化原版桌面 helper；原版 0.5.1 的模块级原生状态在 Web 进程中仅由一个 Session 持有，完成原生 shutdown 后释放。
+- 扩展不枚举普通标签、不保存 profile 或 Cookie，不持有 Web API 凭据。旧外部配对接口返回 retired 回执。
 
-## 权限与边界
+网站完整 CSP 仍保留；并非所有站点都允许嵌入。跨站登录、嵌套子框架与动态文件选择 UI 仍需按实际站点验证；普通模式保持原版插件能力。多模型、所有网站、所有操作系统与用户同时操作的普遍可靠性不是局部集成测试可以证明的。
 
-Safari／Firefox 不申请 `debugger`，通过扩展隔离环境中的私有端口绑定顶层文档，返回 DOM 语义、文本及真实 PNG。写操作沿用同一观察消耗与取消协议；每一步返回后重新检查授权和文档。截图限定实际选定的标签；Safari 捕获期间只要活动标签变化便丢弃图片，Firefox 使用按 tab ID 捕获的 API。兼容构建申请全站主机权限以满足 Firefox 截图 API，实际脚本和 OpenPI 控制仍只接受已授权 HTTP(S) 页面，Safari 还需逐站许可。未授权站点、工作台页面、浏览器内部页、嵌套框架、文件上传及只读输入均不能通过此路径控制。DOM 语义与平台 AX 树不同，依赖受信任输入事件的站点可能拒绝脚本动作。
+## 验证入口
 
-`bun run build:web` 同时构建兼容扩展。构建产物随包提供，不在安装或普通 Session 中启动构建；后台共享原有本机传输和配置，不增加 Pi 工具或第二套 Session。
+- `tests/web/computer-use.test.ts`：真实原版 Schema、原生转发、单 Session 原生所有权、内置缓存、文件路径及状态权限。
+- `tests/web/computer-use-plugin.e2e.ts`：原版 Pi 工具 → 内置后端 → 真 Chrome 扩展；同进程与 OOPIF、混合中英文富文本、中文文件名、服务端完整字节校验、连续输入和回车，以及其他活动标签保持。
+- `tests/web/browser-computer-use.e2e.ts`：截图裁切、遮挡拒绝、文档替换、取消和 debugger 清理。
+- `tests/web/browser-settings.e2e.ts`：设置引导、桌面／窄屏、可访问性及引导窗口所有权；其状态夹具不当作真实安装证据。
 
-Chromium 使用 Manifest V3 服务工作线程；Safari／Firefox 的桌面兼容构建使用两者支持的 Manifest V2 常驻后台，避免工作台隐藏后事件页卸载导致运行中的控制中断。常驻页只在有 OpenPI 工作台连接时轮询本机；关闭该工作台即取消轮询和权限绑定。此构建不支持 iOS Safari。
-
-Chromium 构建申请 HTTP(S) 全站访问及 `debugger` 权限；安装时浏览器会提示。导航增强不使用调试接口。模型控制开启后，每次操作仅暂时 attach 已绑定的原生标签，定位选定顶层文档或内置 iframe，并在 finally 中 detach。页面文本和请求的截图通过已认证的本机连接返回 Pi 工具，随后进入模型上下文。普通浏览器传输使用单独的短期凭据，只能访问该连接的浏览器请求；扩展不读取工作台 API token 的值，也不提供 Cookie API、任意 JavaScript 或远程脚本入口。无权限、DevTools 冲突或站点阻止嵌入时返回明确错误。
-
-控制限定于发起当前 Turn 的 controller、Pi Session、选定浏览器配置和 document。只接受本次观察产生的节点；写操作消耗观察，撤销授权、关闭、导航、切换或取消使旧引用失效。已发送的操作可能产生部分效果，超时或中断按不确定结果报告，不重放输入。普通浏览器截图限于选定页面视口；内置截图限于可见 iframe，隐藏或被设置弹窗覆盖时返回错误，避免将工作台内容当成网页截图。嵌套框架的独立内容暂不提供操作权限。OpenPI 工作台本身不可作为普通浏览器控制目标。
-
-顶层仅识别 loopback 根路径的 OpenPI 页面（标题及入口标记），不是远程身份认证机制。后台端口绑定原生 tab/document，页面桥接还必须匹配 OpenPI 实际 iframe 窗口、一次性 nonce 和活动页面 ID；嵌套框架不接收导航权限。XFO 规则受原生 tab ID、loopback 顶层域及子框架资源类型限制；该顶层标签中的嵌套子框架也在规则范围内，其他浏览器标签页不受影响。规则仅存在于浏览器会话中，后台重启先清理旧规则，再由活跃工作台重新连接。
-
-Chrome 删除规则是异步操作，不能撤销已经处理的响应。同一个原生标签离开工作台、立即进入同一 loopback 域的其他应用时，最早发出的子框架请求可能赶在撤销完成前；撤销完成后的新请求恢复站点原限制。DNR 的顶层域条件不区分本机端口或路径，因此这不是本机不可信应用之间的隔离边界。
-
-## 验证
-
-`tests/web/openpi-web.e2e.ts` 的 `installed browser enhancement` 使用真实 Chrome 扩展测试 XFO 嵌入、地址/标题、前进/后退、刷新、SPA、重定向、内部标签页、空白弹窗，以及 CSP 保留、其他标签页隔离和离开工作台清理。运行方式与其余 Web Playwright 测试相同；需要支持 `Extensions.loadUnpacked` 的 Chrome/Chromium。
-
-`browser-computer-use.e2e.ts` 验证同进程和跨进程内置页面、中文输入、截图范围、遮挡拒绝、取消及调试器清理；`browser-native.e2e.ts` 在真实 Chrome/Edge 配置中验证页面选择、输入、截图、原生文档身份、撤销和关闭；`browser-settings.e2e.ts` 使用明确标注的状态夹具检查设置操作、安装不授权、无障碍和移动端布局。真实 Pi + provider 验收与这些夹具结果分别记录在[设置设计与验收记录](../../docs/design/WEB_BROWSER_SETUP_2026-10-09.md)。
+这些是版本限定的本地集成验证，不是通用模型能力 Benchmark。Pi core 和上游包源码没有被修改。原 MIT notice 保留于 [LICENSE.pi-computer-use](LICENSE.pi-computer-use)。

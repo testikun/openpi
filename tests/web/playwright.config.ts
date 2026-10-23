@@ -37,7 +37,7 @@ export default defineConfig({
   testMatch: [
     "tests/web/openpi-web.e2e.ts",
     "tests/web/browser-computer-use.e2e.ts",
-    "tests/web/browser-native.e2e.ts",
+    "tests/web/computer-use-plugin.e2e.ts",
     "tests/web/browser-settings.e2e.ts",
     "tests/web/composer-clipboard.e2e.ts",
     "tests/web/file-formats.e2e.ts",
