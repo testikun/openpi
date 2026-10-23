@@ -4,13 +4,13 @@ const attachments = new Map();
 
 // Runs atomically in the exact observed document. Browser editing preserves rich
 // editor state; assigning contentEditable.textContent destroys its document tree.
-function editText(text, replace) {
+function editText(text) {
   this.scrollIntoView({ block: "center", inline: "center" });
   this.focus();
   if (this instanceof HTMLInputElement || this instanceof HTMLTextAreaElement) {
     if (this.disabled || this.readOnly || this.type === "file")
       throw new Error("The control is not a text input");
-    const value = (replace ? "" : this.value) + text;
+    const value = text;
     const proto =
       this instanceof HTMLInputElement
         ? HTMLInputElement.prototype
@@ -33,7 +33,6 @@ function editText(text, replace) {
   const selection = this.ownerDocument.getSelection();
   const range = this.ownerDocument.createRange();
   range.selectNodeContents(this);
-  if (!replace) range.collapse(false);
   selection.removeAllRanges();
   selection.addRange(range);
   if (!this.ownerDocument.execCommand("insertText", false, text))
@@ -241,6 +240,16 @@ export async function controlBrowser(
       });
       return `@e${described.node.backendNodeId}`;
     };
+    const keyboardFocus = async () => {
+      const focused = await send("Runtime.evaluate", {
+        expression: `document.activeElement===document.querySelector(${JSON.stringify(selector)})`,
+        returnByValue: true,
+      });
+      if (!focused.result.value)
+        throw new Error(
+          "The selected embedded frame has no keyboard focus. Focus an observed control in this action batch.",
+        );
+    };
     const keys = async (names) => {
       if (!Array.isArray(names) || !names.length || names.length > 16)
         throw new Error("Invalid keypress.");
@@ -258,15 +267,54 @@ export async function controlBrowser(
         (value, name) => value | (bits[name.toLowerCase()] || 0),
         0,
       );
+      const codes = {
+        Backspace: 8,
+        Tab: 9,
+        Enter: 13,
+        Escape: 27,
+        " ": 32,
+        PageUp: 33,
+        PageDown: 34,
+        End: 35,
+        Home: 36,
+        ArrowLeft: 37,
+        ArrowUp: 38,
+        ArrowRight: 39,
+        ArrowDown: 40,
+        Insert: 45,
+        Delete: 46,
+      };
       for (const name of names.filter((name) => !bits[name.toLowerCase()])) {
+        await keyboardFocus();
         const key =
           { return: "Enter", esc: "Escape", space: " " }[name.toLowerCase()] ||
           name;
+        const code = /^[a-z]$/iu.test(key)
+          ? `Key${key.toUpperCase()}`
+          : /^\d$/u.test(key)
+            ? `Digit${key}`
+            : key === " "
+              ? "Space"
+              : key;
+        const windowsVirtualKeyCode =
+          codes[key] ||
+          (/^[a-z0-9]$/iu.test(key)
+            ? key.toUpperCase().charCodeAt(0)
+            : /^F(?:[1-9]|1\d|2[0-4])$/u.test(key)
+              ? 111 + Number(key.slice(1))
+              : undefined);
         await frameSend("Input.dispatchKeyEvent", {
-          type: "keyDown",
+          type:
+            (key.length === 1 || key === "Enter") && !modifiers
+              ? "keyDown"
+              : "rawKeyDown",
           key,
+          code,
+          windowsVirtualKeyCode,
           modifiers,
-          ...(key.length === 1 && !modifiers ? { text: key } : {}),
+          ...(!modifiers && (key.length === 1 || key === "Enter")
+            ? { text: key === "Enter" ? "\r" : key }
+            : {}),
           ...((modifiers === 2 || modifiers === 4) && key.toLowerCase() === "a"
             ? { commands: ["selectAll"] }
             : {}),
@@ -274,6 +322,8 @@ export async function controlBrowser(
         await frameSend("Input.dispatchKeyEvent", {
           type: "keyUp",
           key,
+          code,
+          windowsVirtualKeyCode,
           modifiers,
         });
       }
@@ -365,25 +415,21 @@ export async function controlBrowser(
           if (typeof action.text !== "string" || action.text.length > 16000)
             throw new Error("Invalid input text.");
           const ref = action.ref || (await focusedNode());
-          await withNode(
-            ref,
-            editText.toString(),
-            [action.text, action.action === "setText"],
-            !action.ref,
-          );
+          if (action.action === "setText")
+            await withNode(ref, editText.toString(), [action.text]);
+          else {
+            await withNode(
+              ref,
+              "function(){if(!(this.isContentEditable || this instanceof HTMLInputElement || this instanceof HTMLTextAreaElement) || this.disabled || this.readOnly || this.type==='file')throw new Error('The focused control is not editable');this.focus();}",
+              [],
+              !action.ref,
+            );
+            await keyboardFocus();
+            await frameSend("Input.insertText", { text: action.text });
+          }
         } else if (action.action === "keypress") {
           if (action.ref)
             await withNode(action.ref, "function(){this.focus();}");
-          {
-            const focused = await send("Runtime.evaluate", {
-              expression: `document.activeElement===document.querySelector(${JSON.stringify(selector)})`,
-              returnByValue: true,
-            });
-            if (!focused.result.value)
-              throw new Error(
-                "The selected embedded frame has no keyboard focus. Focus an observed control in this action batch.",
-              );
-          }
           await keys(action.keys);
         } else if (action.action === "click") {
           await pointer(

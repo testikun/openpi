@@ -24,7 +24,7 @@ import { toolExecutionContext } from "../support/extension-tool-context.ts";
 
 test("original Pi tools operate rich text, files and keyboard in exact embedded documents while another tab stays active", async ({
   baseURL,
-}) => {
+}, info) => {
   test.setTimeout(60_000);
   const directory = await mkdtemp(join(tmpdir(), "openpi-original-browser-"));
   const bytes = Buffer.from(
@@ -55,9 +55,10 @@ test("original Pi tools operate rich text, files and keyboard in exact embedded 
       <h1>Embedded integration fixture</h1>
       <div contenteditable role="textbox" aria-label="Rich editor"><p>Original <b>formatted</b> text</p></div>
       <input aria-label="Keyboard editor"><output id="keys">No key</output>
+      <textarea aria-label="Multiline editor"></textarea>
       <input hidden type="file" aria-label="STEP attachment" accept=".stp">
       <button id="upload">Upload selected file</button><output id="receipt">No upload</output>
-      <button id="pointer" onpointerdown="this.dataset.pressed='yes'">Pointer target</button>
+      <button id="pointer" onpointerdown="this.dataset.pressed=String(Number(this.dataset.pressed||0)+1);this.dataset.trusted=String(event.isTrusted)">Pointer target</button>
       <script>
         document.querySelector('[contenteditable]').addEventListener('input',e=>e.currentTarget.dataset.edited='yes');
         document.querySelector('input[aria-label="Keyboard editor"]').addEventListener('keydown',e=>{if(e.key==='Enter')document.querySelector('#keys').textContent=e.currentTarget.value});
@@ -337,48 +338,181 @@ test("original Pi tools operate rich text, files and keyboard in exact embedded 
       await expect(active.frameLocator("iframe").locator("#keys")).toHaveText(
         "OpenPI-中文-230mm",
       );
-      const visual = await run("observe_ui", { root, mode: "visual" });
-      const capture = (
-        visual.details as {
-          capture: { width: number; height: number; coordinateSpace: string };
-        }
-      ).capture;
-      expect(capture.coordinateSpace).toBe("frame-relative-screenshot-pixels");
-      expect(visual.content.some((content) => content.type === "image")).toBe(
-        true,
-      );
-      const frameBox = await active.locator("iframe").boundingBox();
-      const pointer = active.frameLocator("iframe").locator("#pointer");
-      const targetBox = await pointer.boundingBox();
-      if (!frameBox || !targetBox)
-        throw new Error("Missing visible pointer geometry");
-      const x =
-        ((targetBox.x - frameBox.x + targetBox.width / 2) * capture.width) /
-        frameBox.width;
-      const y =
-        ((targetBox.y - frameBox.y + targetBox.height / 2) * capture.height) /
-        frameBox.height;
-      state = stateOf(
-        await run("act_ui", {
-          stateId: stateOf(visual).stateId,
-          actions: [
-            { action: "moveMouse", x, y },
-            { action: "click", x, y },
-          ],
-        }),
-      );
-      await expect(pointer).toHaveAttribute("data-pressed", "yes");
-      const evaluated = await run("evaluate_browser", {
-        stateId: state.stateId,
-        expression: "document.querySelector('#pointer').dataset.pressed",
-      });
-      expect((evaluated.details as { evaluation: unknown }).evaluation).toBe(
-        "yes",
-      );
       await expect(other.getByRole("textbox")).toHaveValue(
         "Human input stays here",
       );
       expect(await activeTabs()).toEqual(beforeActive);
+      // Exercise actual editing defaults while another tab receives a separate
+      // stream of keystrokes, rather than merely checking an untouched value.
+      let humanText = "";
+      let agentFinished = false;
+      await other.getByRole("textbox").fill("");
+      const humanTyping = (async () => {
+        let index = 0;
+        do {
+          const chunk = `human-${index++}|`;
+          humanText += chunk;
+          await other.keyboard.type(chunk, { delay: 3 });
+        } while (!agentFinished);
+      })();
+      const agentEditing = (async () => {
+        const visual = await run("observe_ui", { root, mode: "visual" });
+        const capture = (
+          visual.details as {
+            capture: { width: number; height: number; coordinateSpace: string };
+          }
+        ).capture;
+        expect(capture.coordinateSpace).toBe(
+          "frame-relative-screenshot-pixels",
+        );
+        expect(visual.content.some((content) => content.type === "image")).toBe(
+          true,
+        );
+        const frameBox = await active.locator("iframe").boundingBox();
+        const pointer = active.frameLocator("iframe").locator("#pointer");
+        const targetBox = await pointer.boundingBox();
+        if (!frameBox || !targetBox)
+          throw new Error("Missing visible pointer geometry");
+        const x =
+          ((targetBox.x - frameBox.x + targetBox.width / 2) * capture.width) /
+          frameBox.width;
+        const y =
+          ((targetBox.y - frameBox.y + targetBox.height / 2) * capture.height) /
+          frameBox.height;
+        const pointed = stateOf(
+          await run("act_ui", {
+            stateId: stateOf(visual).stateId,
+            actions: [
+              { action: "moveMouse", x, y },
+              { action: "click", x, y },
+            ],
+          }),
+        );
+        await expect(pointer).toHaveAttribute("data-pressed", "1");
+        await expect(pointer).toHaveAttribute("data-trusted", "true");
+        const evaluated = await run("evaluate_browser", {
+          stateId: pointed.stateId,
+          expression: "document.querySelector('#pointer').dataset.pressed",
+        });
+        expect((evaluated.details as { evaluation: unknown }).evaluation).toBe(
+          "1",
+        );
+        let current = stateOf(
+          await run("observe_ui", { root, mode: "semantic" }),
+        );
+        const editor = current.nodes.find(
+          (node) => node.name === "Keyboard editor",
+        )!;
+        current = stateOf(
+          await run("act_ui", {
+            stateId: current.stateId,
+            actions: [
+              { action: "setText", ref: editor.ref, text: "ABCDE" },
+              { action: "keypress", keys: ["Backspace"] },
+            ],
+          }),
+        );
+        await expect(
+          active
+            .frameLocator("iframe")
+            .getByRole("textbox", { name: "Keyboard editor" }),
+        ).toHaveValue("ABCD");
+        current = stateOf(
+          await run("act_ui", {
+            stateId: current.stateId,
+            actions: [
+              { action: "keypress", keys: ["ArrowLeft"] },
+              { action: "typeText", text: "中" },
+            ],
+          }),
+        );
+        await expect(
+          active
+            .frameLocator("iframe")
+            .getByRole("textbox", { name: "Keyboard editor" }),
+        ).toHaveValue("ABC中D");
+        await run("act_ui", {
+          stateId: current.stateId,
+          actions: [
+            { action: "keypress", keys: ["Meta", "a"] },
+            { action: "typeText", text: "agent-中文-230" },
+            { action: "keypress", keys: ["Enter"] },
+          ],
+        });
+        await expect(
+          active
+            .frameLocator("iframe")
+            .getByRole("textbox", { name: "Keyboard editor" }),
+        ).toHaveValue("agent-中文-230");
+        await expect(active.frameLocator("iframe").locator("#keys")).toHaveText(
+          "agent-中文-230",
+        );
+        current = stateOf(await run("observe_ui", { root, mode: "semantic" }));
+        const multiline = current.nodes.find(
+          (node) => node.name === "Multiline editor",
+        )!;
+        await run("act_ui", {
+          stateId: current.stateId,
+          actions: [
+            { action: "setText", ref: multiline.ref, text: "Line 1" },
+            { action: "keypress", keys: ["Enter"] },
+            { action: "typeText", text: "第二行" },
+          ],
+        });
+        await expect(
+          active
+            .frameLocator("iframe")
+            .getByRole("textbox", { name: "Multiline editor" }),
+        ).toHaveValue("Line 1\n第二行");
+      })().finally(() => {
+        agentFinished = true;
+      });
+      const editing = await Promise.allSettled([humanTyping, agentEditing]);
+      for (const result of editing)
+        if (result.status === "rejected") throw result.reason;
+      await expect(other.getByRole("textbox")).toHaveValue(humanText);
+      await expect(other.getByRole("textbox")).toBeFocused();
+      expect(await activeTabs()).toEqual(beforeActive);
+      const receiptPath = info.outputPath(`background-input-${host}.json`);
+      await writeFile(
+        receiptPath,
+        JSON.stringify(
+          {
+            host,
+            humanExpected: humanText,
+            humanActual: await other.getByRole("textbox").inputValue(),
+            activeBefore: beforeActive,
+            activeAfter: await activeTabs(),
+            humanFocusRetained: await other
+              .getByRole("textbox")
+              .evaluate(
+                (element) => element.ownerDocument.activeElement === element,
+              ),
+            pointerCount: await active
+              .frameLocator("iframe")
+              .locator("#pointer")
+              .getAttribute("data-pressed"),
+            pointerTrusted: await active
+              .frameLocator("iframe")
+              .locator("#pointer")
+              .getAttribute("data-trusted"),
+            keyboard: await active
+              .frameLocator("iframe")
+              .getByRole("textbox", { name: "Keyboard editor" })
+              .inputValue(),
+            multiline: await active
+              .frameLocator("iframe")
+              .getByRole("textbox", { name: "Multiline editor" })
+              .inputValue(),
+          },
+          null,
+          2,
+        ),
+      );
+      await info.attach(`background-input-${host}`, {
+        path: receiptPath,
+        contentType: "application/json",
+      });
       await other.close();
       await page.bringToFront();
     }
