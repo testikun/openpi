@@ -218,7 +218,7 @@ function DirectBrowserPage({
             src={url}
             title={t("browserPageTitle", { address: new URL(url).host })}
             referrerPolicy="no-referrer"
-            sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+            sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-downloads"
             onLoad={() =>
               setPage((current) =>
                 current.revision !== page.revision

@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -1324,15 +1324,26 @@ test("model configuration drafts survive switching settings tabs", async ({
   ).toHaveValue("Unfinished model");
 });
 
-test("native iframe browser supports input, selection, scrolling and independent tabs", async ({
+test("native iframe browser supports input, downloads, selection, scrolling and independent tabs", async ({
   page,
 }) => {
+  const attachment = Buffer.from(
+    "OpenPI public download fixture.\n".repeat(4096),
+  );
   const fixture = createServer((request, response) => {
+    if (request.url === "/download") {
+      response.writeHead(200, {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": 'attachment; filename="openpi-demo.txt"',
+      });
+      response.end(attachment);
+      return;
+    }
     if (request.url === "/blocked")
       response.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
     response.setHeader("Content-Type", "text/html; charset=utf-8");
     response.end(
-      `<!doctype html><title>Native fixture</title><input aria-label="Editor" value="original"><p id="selection">Selectable</p><a href="/next">Navigate</a><a href="/popup" target="_blank">Popup</a><div style="height:2500px">Native scrolling</div>`,
+      `<!doctype html><title>Native fixture</title><input aria-label="Editor" value="original"><p id="selection">Selectable</p><a href="/next">Navigate</a><a href="/popup" target="_blank">Popup</a><a href="/download" download>Download</a><div style="height:2500px">Native scrolling</div>`,
     );
   });
   await new Promise<void>((resolve) => fixture.listen(0, "127.0.0.1", resolve));
@@ -1365,6 +1376,13 @@ test("native iframe browser supports input, selection, scrolling and independent
       "original",
     );
     await frame.getByRole("textbox", { name: "Editor" }).fill("原生中文输入");
+    const downloading = page.waitForEvent("download", { timeout: 5000 });
+    await frame.getByRole("link", { name: "Download", exact: true }).click();
+    const download = await downloading;
+    expect(download.suggestedFilename()).toBe("openpi-demo.txt");
+    const saved = test.info().outputPath("openpi-demo.txt");
+    await download.saveAs(saved);
+    expect(await readFile(saved)).toEqual(attachment);
     await frame.locator("#selection").dblclick({ position: { x: 30, y: 8 } });
     await expect
       .poll(() =>

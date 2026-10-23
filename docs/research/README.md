@@ -25,6 +25,8 @@ Research records preserve sourced investigation and distinguish observations, in
 
 ## Validated investigations
 
+- [`COMPUTER_USE_BROWSER_CONTROL_2026-10-23.md`](COMPUTER_USE_BROWSER_CONTROL_2026-10-23.md) — 中立活动报名样例的 Pi / Maka 同任务对照、共享下载权限修复和输入隔离边界（[#169](https://github.com/openpi-dev/openpi/issues/169)、[Discussion #896](https://github.com/openpi-dev/openpi/discussions/896)）。
+
 - [`PERFORMANCE_AUDIT_2026-10-23.md`](PERFORMANCE_AUDIT_2026-10-23.md) — 九类性能修复及本地验证：子代理结果保留、Workflow checkpoint、目录扫描与大 Markdown；原生 TUI 视觉验收由用户确认（[#841](https://github.com/openpi-dev/openpi/issues/841)）。
 
 - [`COMPUTER_USE_EMBEDDED_INTEGRATION_2026-10-23.md`](COMPUTER_USE_EMBEDDED_INTEGRATION_2026-10-23.md) — original Pi tool schemas shared by native and embedded execution; exact iframe/file/background-tab evidence, removed duplicate transports, lifecycle ablation and live-model HTTP 503 limitation ([#169](https://github.com/openpi-dev/openpi/issues/169), [PR #892](https://github.com/openpi-dev/openpi/pull/892)).
